@@ -1,0 +1,62 @@
+{
+    "Linux_X64": {
+        "ProblemList_openjdk14.txt": [
+            "java/net/Socket/HttpProxy.java",
+            "java/lang/ProcessHandle/OnExitTest.java",
+            "java/lang/StringBuffer/AppendCharSequence.java"
+        ],
+        "ProblemList_openjdk15.txt": [
+            "java/nio/channels/etc/OpenAndConnect.java"
+        ]
+    },
+    "Windows_NT_X64": {
+        "ProblemList_openjdk14.txt": [
+            "java/net/httpclient/BodySubscribersTest.java",
+            "native_sanity/simplenativelib2/NativeLib.java",
+            "native_sanity/simplenativelib/NativeLib.java",
+            "native_sanity/simplenativelauncher/ProgramTest.java"
+        ]
+    },
+    "Darwin_X64": {
+        "ProblemList_openjdk14.txt": [
+            "java/net/DatagramSocket/B6411513.java",
+            "java/net/DatagramSocket/Send12k.java",
+            "java/net/DatagramSocket/PortUnreachable.java",
+            "java/net/DatagramPacket/ReuseBuf.java",
+            "java/net/DatagramSocket/SetDatagramSocketImplFactory/ADatagramSocket.java",
+            "java/net/DatagramSocket/SendSize.java",
+            "java/net/ipv6tests/UdpTest.java",
+            "java/net/MulticastSocket/Promiscuous.java",
+            "java/net/MulticastSocket/SetOutgoingIf.java",
+            "java/nio/channels/DatagramChannel/AdaptDatagramSocket.java",
+            "java/nio/channels/DatagramChannel/Connect.java",
+            "java/nio/channels/DatagramChannel/ConnectedSend.java",
+            "java/nio/channels/DatagramChannel/Disconnect.java",
+            "java/nio/channels/DatagramChannel/NotBound.java",
+            "java/nio/channels/DatagramChannel/ReceiveISA.java",
+            "java/nio/channels/DatagramChannel/Sender.java",
+            "java/nio/channels/DatagramChannel/SRTest.java"
+        ],
+        "ProblemList_openjdk15.txt": [
+            "java/net/DatagramSocket/B6411513.java",
+            "java/net/DatagramSocket/Send12k.java",
+            "java/net/DatagramSocket/PortUnreachable.java",
+            "java/net/DatagramPacket/ReuseBuf.java",
+            "java/net/DatagramSocket/SetDatagramSocketImplFactory/ADatagramSocket.java",
+            "java/net/DatagramSocket/SendSize.java",
+            "java/net/ipv6tests/UdpTest.java",
+            "java/net/MulticastSocket/SetLoopbackModeIPv4.java",
+            "java/net/MulticastSocket/Promiscuous.java",
+            "java/nio/channels/DatagramChannel/AdaptorBasic.java",
+            "java/nio/channels/DatagramChannel/AdaptorMulticasting.java",
+            "java/nio/channels/DatagramChannel/Connect.java",
+            "java/nio/channels/DatagramChannel/ConnectedSend.java",
+            "java/nio/channels/DatagramChannel/Disconnect.java",
+            "java/nio/channels/DatagramChannel/ManySourcesAndTargets.java",
+            "java/nio/channels/DatagramChannel/NotBound.java",
+            "java/nio/channels/DatagramChannel/ReceiveISA.java",
+            "java/nio/channels/DatagramChannel/Sender.java",
+            "java/nio/channels/DatagramChannel/SRTest.java"
+        ]
+    }
+}

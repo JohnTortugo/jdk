@@ -1,0 +1,43 @@
+
+name: "$(Year:yyyy).$(Month).0.$(BuildID)-nightly"
+
+trigger: none
+
+pr: none
+
+schedules:
+  # Convert the UTC time to VNC time, so 5AM UTC is 10PM Vancouver time
+  # We run this every Monday
+  - cron: "0 5 * * 1"
+    displayName: Nightly CI
+    always: true
+    branches:
+      include:
+        - master
+
+resources:
+  repositories:
+    - repository: openjdk_build
+      type: git
+      name: Juniper/adopt-build
+      ref: refs/heads/juniper
+
+  containers:
+    - container: "linux_container"
+      image: "junipercontainerregistry.azurecr.io/linux_amd64_agent:latest"
+      endpoint: "juniper-container-registry"
+      volumes:
+        - "/var/run/docker.sock:/var/run/docker.sock"
+        - "/usr/bin/docker:/usr/bin/docker"
+      options: "--security-opt seccomp=unconfined"
+
+stages:
+  - template: azure-devops/build/stages/build.yml@openjdk_build
+    parameters:
+      linuxContainer: "linux_container"
+      buildJavaVersion: "jdk"
+
+  - template: azure-devops/test/stages/test.yml@openjdk_build
+    parameters:
+      linuxContainer: "linux_container"
+      buildJavaVersion: "jdk"
