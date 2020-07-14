@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012, 2018, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2020, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -19,29 +19,38 @@
  * Please contact Oracle, 500 Oracle Parkway, Redwood Shores, CA 94065 USA
  * or visit www.oracle.com if you need additional information or have any
  * questions.
+ *
  */
-package vm.share.vmcrasher;
 
-import vm.share.UnsafeAccess;
+#ifndef SHARE_UTILITIES_AUTORESTORE_HPP
+#define SHARE_UTILITIES_AUTORESTORE_HPP
 
-public class UnsafeJavaCrasher extends Crasher {
+#include "memory/allocation.hpp"
 
-    private static class C {
-        C next;
-    }
+// A simplistic template providing a general save-restore pattern through a
+// local auto/stack object (scope).
+//
+template<typename T> class AutoSaveRestore : public StackObj {
+public:
+  AutoSaveRestore(T &loc) : _loc(loc) {
+    _value = loc;
+  }
+  ~AutoSaveRestore() {
+    _loc = _value;
+  }
+private:
+  T &_loc;
+  T _value;
+};
 
-    @SuppressWarnings("restriction")
-    @Override
-    public void run() {
-        try {
-            C a = new C();
-            a.next = new C();
-            a.next.next = new C();
-            UnsafeAccess.unsafe.putInt(a.next, UnsafeAccess.unsafe.objectFieldOffset(C.class.getDeclaredField("next")), 0xDEADCAFE);
-            a.next.next.next = new C();
-        } catch ( Throwable t ) {
-            t.printStackTrace();
-        }
-    }
+// A simplistic template providing a general modify-restore pattern through a
+// local auto/stack object (scope).
+//
+template<typename T> class AutoModifyRestore : private AutoSaveRestore<T> {
+public:
+  AutoModifyRestore(T &loc, T value) : AutoSaveRestore<T>(loc) {
+    loc = value;
+  }
+};
 
-}
+#endif // SHARE_UTILITIES_AUTORESTORE_HPP
