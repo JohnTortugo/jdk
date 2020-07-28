@@ -1618,14 +1618,14 @@ JvmtiEnv::GetFrameCount(JavaThread* java_thread, jint* count_ptr) {
   }
 
   // It is only safe to perform the direct operation on the current
-  // thread. All other usage needs to use a vm-safepoint-op for safety.
+  // thread. All other usage needs to use a direct handshake for safety.
   if (java_thread == JavaThread::current()) {
     err = get_frame_count(state, count_ptr);
   } else {
-    // get java stack frame count at safepoint.
-    VM_GetFrameCount op(this, state, count_ptr);
-    VMThread::execute(&op);
-    err = op.result();
+    // get java stack frame count with handshake.
+    GetFrameCountClosure op(this, state, count_ptr);
+    bool executed = Handshake::execute_direct(&op, java_thread);
+    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
   }
   return err;
 } /* end GetFrameCount */
@@ -1748,14 +1748,14 @@ JvmtiEnv::GetFrameLocation(JavaThread* java_thread, jint depth, jmethodID* metho
   jvmtiError err = JVMTI_ERROR_NONE;
 
   // It is only safe to perform the direct operation on the current
-  // thread. All other usage needs to use a vm-safepoint-op for safety.
+  // thread. All other usage needs to use a direct handshake for safety.
   if (java_thread == JavaThread::current()) {
     err = get_frame_location(java_thread, depth, method_ptr, location_ptr);
   } else {
-    // JVMTI get java stack frame location at safepoint.
-    VM_GetFrameLocation op(this, java_thread, depth, method_ptr, location_ptr);
-    VMThread::execute(&op);
-    err = op.result();
+    // JVMTI get java stack frame location via direct handshake.
+    GetFrameLocationClosure op(this, depth, method_ptr, location_ptr);
+    bool executed = Handshake::execute_direct(&op, java_thread);
+    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
   }
   return err;
 } /* end GetFrameLocation */
@@ -2516,54 +2516,54 @@ JvmtiEnv::GetClassMethods(oop k_mirror, jint* method_count_ptr, jmethodID** meth
   jmethodID* result_list = (jmethodID*)jvmtiMalloc(result_length * sizeof(jmethodID));
   int index;
   bool jmethodids_found = true;
+  int skipped = 0;  // skip overpass methods
 
-  if (JvmtiExport::can_maintain_original_method_order()) {
-    // Use the original method ordering indices stored in the class, so we can emit
-    // jmethodIDs in the order they appeared in the class file
-    for (index = 0; index < result_length; index++) {
-      Method* m = ik->methods()->at(index);
-      int original_index = ik->method_ordering()->at(index);
-      assert(original_index >= 0 && original_index < result_length, "invalid original method index");
-      jmethodID id;
-      if (jmethodids_found) {
-        id = m->find_jmethod_id_or_null();
-        if (id == NULL) {
-          // If we find an uninitialized value, make sure there is
-          // enough space for all the uninitialized values we might
-          // find.
-          ik->ensure_space_for_methodids(index);
-          jmethodids_found = false;
-          id = m->jmethod_id();
-        }
-      } else {
+  for (index = 0; index < result_length; index++) {
+    Method* m = ik->methods()->at(index);
+    // Depending on can_maintain_original_method_order capability use the original
+    // method ordering indices stored in the class, so we can emit jmethodIDs in
+    // the order they appeared in the class file or just copy in current order.
+    int result_index = JvmtiExport::can_maintain_original_method_order() ? ik->method_ordering()->at(index) : index;
+    assert(result_index >= 0 && result_index < result_length, "invalid original method index");
+    if (m->is_overpass()) {
+      result_list[result_index] = NULL;
+      skipped++;
+      continue;
+    }
+    jmethodID id;
+    if (jmethodids_found) {
+      id = m->find_jmethod_id_or_null();
+      if (id == NULL) {
+        // If we find an uninitialized value, make sure there is
+        // enough space for all the uninitialized values we might
+        // find.
+        ik->ensure_space_for_methodids(index);
+        jmethodids_found = false;
         id = m->jmethod_id();
       }
-      result_list[original_index] = id;
+    } else {
+      id = m->jmethod_id();
     }
-  } else {
-    // otherwise just copy in any order
-    for (index = 0; index < result_length; index++) {
-      Method* m = ik->methods()->at(index);
-      jmethodID id;
-      if (jmethodids_found) {
-        id = m->find_jmethod_id_or_null();
-        if (id == NULL) {
-          // If we find an uninitialized value, make sure there is
-          // enough space for all the uninitialized values we might
-          // find.
-          ik->ensure_space_for_methodids(index);
-          jmethodids_found = false;
-          id = m->jmethod_id();
-        }
-      } else {
-        id = m->jmethod_id();
-      }
-      result_list[index] = id;
-    }
+    result_list[result_index] = id;
   }
+
   // Fill in return value.
-  *method_count_ptr = result_length;
-  *methods_ptr = result_list;
+  if (skipped > 0) {
+    // copy results skipping NULL methodIDs
+    *methods_ptr = (jmethodID*)jvmtiMalloc((result_length - skipped) * sizeof(jmethodID));
+    *method_count_ptr = result_length - skipped;
+    for (index = 0, skipped = 0; index < result_length; index++) {
+      if (result_list[index] == NULL) {
+        skipped++;
+      } else {
+        (*methods_ptr)[index - skipped] = result_list[index];
+      }
+    }
+    deallocate((unsigned char *)result_list);
+  } else {
+    *method_count_ptr = result_length;
+    *methods_ptr = result_list;
+  }
 
   return JVMTI_ERROR_NONE;
 } /* end GetClassMethods */
