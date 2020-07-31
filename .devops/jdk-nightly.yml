@@ -13,7 +13,7 @@ schedules:
     always: true
     branches:
       include:
-        - master
+        - main
 
 resources:
   repositories:

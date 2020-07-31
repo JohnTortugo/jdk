@@ -3,7 +3,7 @@ name: "$(Year:yyyy).$(Month).0.$(BuildID)-ci"
 trigger:
   branches:
     include:
-      - master
+      - main
 
 pr: none
 
