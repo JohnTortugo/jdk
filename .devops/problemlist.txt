@@ -1,1 +1,32 @@
 java/lang/ProcessHandle/OnExitTest.java         1218            linux-all
+
+# transport error 202: getaddrinfo: failed to parse address
+com/sun/jdi/AccessSpecifierTest.java            5158            macosx-all
+com/sun/jdi/redefineMethod/RedefineTest.java    5158            macosx-all
+com/sun/jdi/AfterThreadDeathTest.java           5158            macosx-all
+com/sun/jdi/ArrayRangeTest.java                 5158            macosx-all
+com/sun/jdi/EarlyReturnTest.java                5158            macosx-all
+com/sun/jdi/ConstantPoolInfo.java               5158            macosx-all
+com/sun/jdi/CountFilterTest.java                5158            macosx-all
+com/sun/jdi/EarlyReturnNegativeTest.java        5158            macosx-all
+com/sun/jdi/InterfaceMethodsTest.java           5158            macosx-all
+com/sun/jdi/ReferrersTest.java                  5158            macosx-all
+com/sun/jdi/VarargsTest.java                    5158            macosx-all
+com/sun/jdi/FieldWatchpoints.java               5158            macosx-all
+com/sun/jdi/FramesTest.java                     5158            macosx-all
+com/sun/jdi/InvokeTest.java                     5158            macosx-all
+com/sun/jdi/RequestReflectionTest.java          5158            macosx-all
+com/sun/jdi/InstanceFilter.java                 5158            macosx-all
+com/sun/jdi/ResumeOneThreadTest.java            5158            macosx-all
+com/sun/jdi/LocalVariableEqual.java             5158            macosx-all
+com/sun/jdi/LocationTest.java                   5158            macosx-all
+com/sun/jdi/ModificationWatchpoints.java        5158            macosx-all
+com/sun/jdi/MonitorEventTest.java               5158            macosx-all
+com/sun/jdi/MonitorFrameInfo.java               5158            macosx-all
+com/sun/jdi/PopAndStepTest.java                 5158            macosx-all
+com/sun/jdi/PopAsynchronousTest.java            5158            macosx-all
+com/sun/jdi/SourceNameFilterTest.java           5158            macosx-all
+com/sun/jdi/sde/MangleTest.java                 5158            macosx-all
+com/sun/jdi/NullThreadGroupNameTest.java        5158            macosx-all
+com/sun/jdi/Vars.java                           5158            macosx-all
+com/sun/jdi/sde/TemperatureTableTest.java       5158            macosx-all
