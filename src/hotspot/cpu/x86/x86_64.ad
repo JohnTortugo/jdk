@@ -6366,6 +6366,16 @@ instruct bytes_reverse_short(rRegI dst, rFlagsReg cr) %{
   ins_pipe( ialu_reg );
 %}
 
+//----------BSWAP Instructions-------------------------------------------------
+instruct bits_reverse_int(rRegI dst) %{
+  match(Set dst (ReverseBitsI dst));
+
+  format %{ "bswapl  $dst" %}
+  opcode(0x0F, 0xC8);  /*Opcode 0F /C8 */
+  ins_encode( REX_reg(dst), OpcP, opc2_reg(dst) );
+  ins_pipe( ialu_reg );
+%}
+
 //---------- Zeros Count Instructions ------------------------------------------
 
 instruct countLeadingZerosI(rRegI dst, rRegI src, rFlagsReg cr) %{

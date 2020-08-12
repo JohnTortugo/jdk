@@ -514,4 +514,14 @@ public:
   virtual uint ideal_reg() const { return Op_RegI; }
 };
 
+//-------------------------------ReverseBitsINode--------------------------------
+// reverse bits of an integer
+class ReverseBitsINode : public Node {
+public:
+  ReverseBitsINode(Node *c, Node *in1) : Node(c, in1) {}
+  virtual int Opcode() const;
+  const Type *bottom_type() const { return TypeInt::INT; }
+  virtual uint ideal_reg() const { return Op_RegI; }
+};
+
 #endif // SHARE_OPTO_SUBNODE_HPP

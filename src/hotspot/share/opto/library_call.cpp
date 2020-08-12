@@ -804,7 +804,8 @@ bool LibraryCallKit::try_to_inline(int predicate) {
   case vmIntrinsics::_reverseBytes_i:
   case vmIntrinsics::_reverseBytes_l:
   case vmIntrinsics::_reverseBytes_s:
-  case vmIntrinsics::_reverseBytes_c:           return inline_number_methods(intrinsic_id());
+  case vmIntrinsics::_reverseBytes_c:
+  case vmIntrinsics::_reverseBits_i:            return inline_number_methods(intrinsic_id());
 
   case vmIntrinsics::_getCallerClass:           return inline_native_Reflection_getCallerClass();
 
@@ -2310,6 +2311,7 @@ bool LibraryCallKit::inline_number_methods(vmIntrinsics::ID id) {
   case vmIntrinsics::_reverseBytes_s:           n = new ReverseBytesSNode( 0,   arg);  break;
   case vmIntrinsics::_reverseBytes_i:           n = new ReverseBytesINode( 0,   arg);  break;
   case vmIntrinsics::_reverseBytes_l:           n = new ReverseBytesLNode( 0,   arg);  break;
+  case vmIntrinsics::_reverseBits_i:            n = new ReverseBitsINode( 0,   arg);  break;
   default:  fatal_unexpected_iid(id);  break;
   }
   set_result(_gvn.transform(n));

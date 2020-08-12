@@ -248,6 +248,9 @@ bool C2Compiler::is_intrinsic_supported(const methodHandle& method, bool is_virt
   case vmIntrinsics::_reverseBytes_l:
     if (!Matcher::match_rule_supported(Op_ReverseBytesL)) return false;
     break;
+  case vmIntrinsics::_reverseBits_i:
+    if (!Matcher::match_rule_supported(Op_ReverseBitsI)) return false;
+    break;
 
   /* CompareAndSet, Object: */
   case vmIntrinsics::_compareAndSetReference:
