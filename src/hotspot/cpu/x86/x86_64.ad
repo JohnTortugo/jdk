@@ -6373,6 +6373,10 @@ instruct bits_reverse_int(rRegI dst) %{
   format %{ "cesar" %}
   ins_encode %{
     printf("bits_reverse 1\n");
+    Register Rdst = $dst$$Register;
+    Label first;
+    __ bind(first);
+    __ movl(Rdst, 1);
   %}
   ins_pipe( ialu_reg );
 %}
@@ -6383,6 +6387,10 @@ instruct bits_reverse_int_imm2(rRegI dst, immI value) %{
   format %{ "cesar imm" %}
   ins_encode %{
     printf("bits_reverse 2\n");
+    Register Rdst = $dst$$Register;
+    Label second;
+    __ bind(second);
+    __ movl(Rdst, 2);
   %}
   ins_pipe( ialu_reg );
 %}
@@ -6393,6 +6401,10 @@ instruct bits_reverse_int_imm3(immI value, rRegI dst) %{
   format %{ "cesar imm 3" %}
   ins_encode %{
     printf("bits_reverse 3\n");
+    Register Rdst = $dst$$Register;
+    Label third;
+    __ bind(third);
+    __ negl(Rdst);
   %}
   ins_pipe( ialu_reg );
 %}

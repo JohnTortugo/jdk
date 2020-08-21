@@ -4033,6 +4033,7 @@ int MatchRule::is_expensive() const {
         strcmp(opType,"RoundDouble")==0 ||
         strcmp(opType,"RoundDoubleMode")==0 ||
         strcmp(opType,"RoundFloat")==0 ||
+        strcmp(opType,"ReverseBitsI")==0 ||
         strcmp(opType,"ReverseBytesI")==0 ||
         strcmp(opType,"ReverseBytesL")==0 ||
         strcmp(opType,"ReverseBytesUS")==0 ||

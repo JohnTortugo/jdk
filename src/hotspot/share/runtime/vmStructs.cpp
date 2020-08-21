@@ -1740,6 +1740,7 @@ typedef HashtableEntry<InstanceKlass*, mtClass>  KlassHashtableEntry;
   declare_c2_type(AtanDNode, Node)                                        \
   declare_c2_type(SqrtFNode, Node)                                        \
   declare_c2_type(SqrtDNode, Node)                                        \
+  declare_c2_type(ReverseBitsINode, Node)                                 \
   declare_c2_type(ReverseBytesINode, Node)                                \
   declare_c2_type(ReverseBytesLNode, Node)                                \
   declare_c2_type(ReductionNode, Node)                                    \

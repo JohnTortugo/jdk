@@ -840,6 +840,8 @@
   do_intrinsic(_bitCount_i,               java_lang_Integer,      bitCount_name,            int_int_signature,   F_S)   \
   do_intrinsic(_bitCount_l,               java_lang_Long,         bitCount_name,            long_int_signature,  F_S)   \
                                                                                                                         \
+  do_intrinsic(_reverseBits_i,            java_lang_Integer,      reverse_name,             int_int_signature,   F_S)   \
+   do_name(     reverse_name,                                     "reverse")                                            \
   do_intrinsic(_reverseBytes_i,           java_lang_Integer,      reverseBytes_name,        int_int_signature,   F_S)   \
    do_name(     reverseBytes_name,                               "reverseBytes")                                        \
   do_intrinsic(_reverseBytes_l,           java_lang_Long,         reverseBytes_name,        long_long_signature, F_S)   \
@@ -848,8 +850,6 @@
     /*  (symbol reverseBytes_name defined above) */                                                                     \
   do_intrinsic(_reverseBytes_s,           java_lang_Short,        reverseBytes_name,        short_short_signature, F_S) \
     /*  (symbol reverseBytes_name defined above) */                                                                     \
-  do_intrinsic(_reverseBits_i,            java_lang_Integer,      reverseBits_name,        int_int_signature,   F_S)    \
-   do_name(     reverseBits_name,                                 "reverse")                                            \
                                                                                                                         \
   do_intrinsic(_identityHashCode,         java_lang_System,       identityHashCode_name, object_int_signature,   F_S)   \
    do_name(     identityHashCode_name,                           "identityHashCode")                                    \
