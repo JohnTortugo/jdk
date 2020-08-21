@@ -6325,7 +6325,7 @@ instruct cacheWBPostSync()
 instruct bytes_reverse_int(rRegI dst) %{
   match(Set dst (ReverseBytesI dst));
 
-  format %{ "bswapl  $dst" %}
+  format %{ "bswapl  $dst # cesar 6328" %}
   opcode(0x0F, 0xC8);  /*Opcode 0F /C8 */
   ins_encode( REX_reg(dst), OpcP, opc2_reg(dst) );
   ins_pipe( ialu_reg );
@@ -6334,7 +6334,7 @@ instruct bytes_reverse_int(rRegI dst) %{
 instruct bytes_reverse_long(rRegL dst) %{
   match(Set dst (ReverseBytesL dst));
 
-  format %{ "bswapq  $dst" %}
+  format %{ "bswapq  $dst # cesar6337" %}
   opcode(0x0F, 0xC8); /* Opcode 0F /C8 */
   ins_encode( REX_reg_wide(dst), OpcP, opc2_reg(dst) );
   ins_pipe( ialu_reg);
@@ -6344,7 +6344,7 @@ instruct bytes_reverse_unsigned_short(rRegI dst, rFlagsReg cr) %{
   match(Set dst (ReverseBytesUS dst));
   effect(KILL cr);
 
-  format %{ "bswapl  $dst\n\t"
+  format %{ "bswapl  $dst\n\t #cesar 6347"
             "shrl    $dst,16\n\t" %}
   ins_encode %{
     __ bswapl($dst$$Register);
@@ -6357,7 +6357,7 @@ instruct bytes_reverse_short(rRegI dst, rFlagsReg cr) %{
   match(Set dst (ReverseBytesS dst));
   effect(KILL cr);
 
-  format %{ "bswapl  $dst\n\t"
+  format %{ "bswapl  $dst\n\t   # cesar 6360"
             "sar     $dst,16\n\t" %}
   ins_encode %{
     __ bswapl($dst$$Register);
@@ -6366,15 +6366,37 @@ instruct bytes_reverse_short(rRegI dst, rFlagsReg cr) %{
   ins_pipe( ialu_reg );
 %}
 
-//----------BSWAP Instructions-------------------------------------------------
+//----------Bit Reversal Instructions-------------------------------------------------
 instruct bits_reverse_int(rRegI dst) %{
   match(Set dst (ReverseBitsI dst));
 
-  format %{ "bswapl  $dst" %}
-  opcode(0x0F, 0xC8);  /*Opcode 0F /C8 */
-  ins_encode( REX_reg(dst), OpcP, opc2_reg(dst) );
+  format %{ "cesar" %}
+  ins_encode %{
+    printf("bits_reverse 1\n");
+  %}
   ins_pipe( ialu_reg );
 %}
+
+instruct bits_reverse_int_imm2(rRegI dst, immI value) %{
+  match(Set dst (ReverseBitsI value));
+
+  format %{ "cesar imm" %}
+  ins_encode %{
+    printf("bits_reverse 2\n");
+  %}
+  ins_pipe( ialu_reg );
+%}
+
+instruct bits_reverse_int_imm3(immI value, rRegI dst) %{
+  match(Set dst (ReverseBitsI value));
+
+  format %{ "cesar imm 3" %}
+  ins_encode %{
+    printf("bits_reverse 3\n");
+  %}
+  ins_pipe( ialu_reg );
+%}
+
 
 //---------- Zeros Count Instructions ------------------------------------------
 

@@ -2080,6 +2080,7 @@ bool Matcher::find_shared_visit(MStack& mstack, Node* n, uint opcode, bool& mem_
           n->unique_out()->is_Store() ) // Following store
         set_shared(n);       // Force it to be a root
       break;
+    case Op_ReverseBitsI:
     case Op_ReverseBytesI:
     case Op_ReverseBytesL:
       if( n->in(1)->is_Load() &&        // Prior load

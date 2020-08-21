@@ -849,7 +849,7 @@
   do_intrinsic(_reverseBytes_s,           java_lang_Short,        reverseBytes_name,        short_short_signature, F_S) \
     /*  (symbol reverseBytes_name defined above) */                                                                     \
   do_intrinsic(_reverseBits_i,            java_lang_Integer,      reverseBits_name,        int_int_signature,   F_S)    \
-   do_name(     reverseBits_name,                                 "reverseBits")                                        \
+   do_name(     reverseBits_name,                                 "reverse")                                            \
                                                                                                                         \
   do_intrinsic(_identityHashCode,         java_lang_System,       identityHashCode_name, object_int_signature,   F_S)   \
    do_name(     identityHashCode_name,                           "identityHashCode")                                    \
