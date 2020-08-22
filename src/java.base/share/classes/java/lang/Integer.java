@@ -1757,7 +1757,7 @@ public final class Integer extends Number
         i = (i & 0x33333333) << 2 | (i >>> 2) & 0x33333333;
         i = (i & 0x0f0f0f0f) << 4 | (i >>> 4) & 0x0f0f0f0f;
 
-        return 0;//reverseBytes(i);
+        return reverseBytes(i);
     }
 
     /**
