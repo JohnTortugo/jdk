@@ -1,0 +1,77 @@
+============================= C2-compiled nmethod ==============================
+----------------------- MetaData before Compile_id = 494 ------------------------
+{method}
+ - this oop:          0x00007f31a81f94a8
+ - method holder:     'java/lang/Integer'
+ - constants:         0x00007f31a81f4e28 constant pool [442] {0x00007f31a81f4e28} for 'java/lang/Integer' cache=0x00007f31a8270cf8
+ - access:            0x81000009  public static 
+ - name:              'reverse'
+ - signature:         '(I)I'
+ - max stack:         4
+ - max locals:        1
+ - size of params:    1
+ - method size:       13
+ - intrinsic id:      55 _reverseBits_i
+ - highest level:     2
+ - vtable index:      -2
+ - i2i entry:         0x00007f31b1010c00
+ - adapters:          AHE@0x00007f31c02b14d0: 0xa0000000 i2c: 0x00007f31b105dbe0 c2i: 0x00007f31b105dcbf c2iUV: 0x00007f31b105dc89 c2iNCI: 0x00007f31b105dcfc
+ - compiled entry     0x00007f31b15d2f40
+ - code size:         53
+ - code start:        0x00007f31a81f9450
+ - code end (excl):   0x00007f31a81f9485
+ - method data:       0x00007f31a8725ba8
+ - checked ex length: 0
+ - linenumber start:  0x00007f31a81f9485
+ - localvar length:   1
+ - localvar start:    0x00007f31a81f9492
+ - compiled code: nmethod  32810  403       2       java.lang.Integer::reverse (53 bytes)
+
+------------------------ OptoAssembly for Compile_id = 494 -----------------------
+#
+#  int ( int )
+#
+#r018 rsi   : parm 0: int
+# -- Old rsp -- Framesize: 32 --
+#r583 rsp+28: in_preserve
+#r582 rsp+24: return address
+#r581 rsp+20: in_preserve
+#r580 rsp+16: saved fp register
+#r579 rsp+12: pad2, stack alignment
+#r578 rsp+ 8: pad2, stack alignment
+#r577 rsp+ 4: Fixed slot 1
+#r576 rsp+ 0: Fixed slot 0
+#
+000     N1: #	out( B1 ) <- in( B1 )  Freq: 1
+
+000     B1: #	out( N1 ) <- BLOCK HEAD IS JUNK  Freq: 1
+000     # stack bang (96 bytes)
+	pushq   rbp	# Save rbp
+	subq    rsp, #16	# Create frame
+
+00c     movl    RAX, RSI	# spill
+00e     andl    RAX, #1431655765	# int
+014     shrl    RSI, #1
+016     sall    RAX, #1
+018     andl    RSI, #1431655765	# int
+01e     orl     RAX, RSI	# int
+020     movl    R10, RAX	# spill
+023     shrl    R10, #2
+027     andl    RAX, #858993459	# int
+02d     andl    R10, #858993459	# int
+034     sall    RAX, #2
+037     orl     RAX, R10	# int
+03a     movl    R10, RAX	# spill
+03d     shrl    R10, #4
+041     andl    RAX, #252645135	# int
+047     andl    R10, #252645135	# int
+04e     sall    RAX, #4
+051     orl     RAX, R10	# int
+054     bswapl  RAX # cesar 6328
+056     addq    rsp, 16	# Destroy frame
+	popq    rbp
+	movq    rscratch1, poll_offset[r15_thread] #polling_page_address
+	testl   rax, [rscratch1]	# Safepoint: poll for GC
+
+065     ret
+
