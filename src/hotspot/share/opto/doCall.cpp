@@ -592,6 +592,11 @@ void Parse::do_call() {
   dec_sp(nargs);              // Temporarily pop args for JVM state of call
   JVMState* jvms = sync_jvms();
 
+  tty->print_cr("Cesar) Calee is %s\n", callee->name()->as_utf8());
+  if (strcmp(callee->name()->as_utf8(), "reverse") == 0) {
+    tty->print_cr("Cesar), found!!!!");
+  }
+
   // ---------------------
   // Decide call tactic.
   // This call checks with CHA, the interpreter profile, intrinsics table, etc.

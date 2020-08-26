@@ -840,8 +840,9 @@
   do_intrinsic(_bitCount_i,               java_lang_Integer,      bitCount_name,            int_int_signature,   F_S)   \
   do_intrinsic(_bitCount_l,               java_lang_Long,         bitCount_name,            long_int_signature,  F_S)   \
                                                                                                                         \
-  do_intrinsic(_reverseBits_i,            java_lang_Integer,      reverse_name,             int_int_signature,   F_S)   \
-   do_name(     reverse_name,                                     "reverse")                                            \
+  do_class(Reverse_Test,               "Reverse")                                                            \
+  do_name(     reverse_name,                                     "reverse")                                            \
+  do_intrinsic(_reverseBits_i,            Reverse_Test,      reverse_name,             int_int_signature,   F_S)   \
   do_intrinsic(_reverseBytes_i,           java_lang_Integer,      reverseBytes_name,        int_int_signature,   F_S)   \
    do_name(     reverseBytes_name,                               "reverseBytes")                                        \
   do_intrinsic(_reverseBytes_l,           java_lang_Long,         reverseBytes_name,        long_long_signature, F_S)   \
