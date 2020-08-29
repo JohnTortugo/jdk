@@ -1615,10 +1615,6 @@ void Method::init_intrinsic_id() {
   assert((uintptr_t)vmIntrinsics::ID_LIMIT <= max_id_uint, "else fix size");
   assert(intrinsic_id_size_in_bytes() == sizeof(_intrinsic_id), "");
 
-  if (strcmp(name()->as_utf8(), "reverse") == 0) {
-    tty->print("heye hey heye\n");
-  }
-
   // the klass name is well-known:
   vmSymbols::SID klass_id = klass_id_for_intrinsics(method_holder());
   assert(klass_id != vmSymbols::NO_SID, "caller responsibility");

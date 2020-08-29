@@ -1750,6 +1750,7 @@ public final class Integer extends Number
      *     specified {@code int} value.
      * @since 1.5
      */
+    @HotSpotIntrinsicCandidate
     public static int reverse(int i) {
         // HD, Figure 7-1
         i = (i & 0x55555555) << 1 | (i >>> 1) & 0x55555555;

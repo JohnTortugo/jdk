@@ -167,8 +167,6 @@ bool C2Compiler::is_intrinsic_supported(const methodHandle& method, bool is_virt
   vmIntrinsics::ID id = method->intrinsic_id();
   assert(id != vmIntrinsics::_none, "must be a VM intrinsic");
 
-  tty->print_cr("Cesar)) %s -> %d\n", method->name()->as_utf8(), id);
-
   if (id < vmIntrinsics::FIRST_ID || id > vmIntrinsics::LAST_COMPILER_INLINE) {
     return false;
   }

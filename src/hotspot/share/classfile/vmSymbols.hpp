@@ -841,7 +841,7 @@
   do_intrinsic(_bitCount_i,               java_lang_Integer,      bitCount_name,            int_int_signature,   F_S)   \
   do_intrinsic(_bitCount_l,               java_lang_Long,         bitCount_name,            long_int_signature,  F_S)   \
                                                                                                                         \
-  do_intrinsic(_reverseBits_i,            Reverse,           reverse_name,             int_int_signature,   F_R)        \
+  do_intrinsic(_reverseBits_i,            java_lang_Integer,      reverse_name,             int_int_signature,   F_S)   \
    do_name(     reverse_name,                                     "reverse")                                            \
   do_intrinsic(_reverseBytes_i,           java_lang_Integer,      reverseBytes_name,        int_int_signature,   F_S)   \
    do_name(     reverseBytes_name,                                "reverseBytes")                                       \
@@ -1659,7 +1659,6 @@ public:
     assert(    class_for(id) == holder, "correct id");
     assert(     name_for(id) == name,   "correct id");
     assert(signature_for(id) == sig,    "correct id");
-    tty->print_cr("Cesar) name is %d, ID -> %d\n", name_for(id), id);
     return id;
   }
 
