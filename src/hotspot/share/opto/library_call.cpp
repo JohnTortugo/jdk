@@ -2311,7 +2311,7 @@ bool LibraryCallKit::inline_number_methods(vmIntrinsics::ID id) {
   case vmIntrinsics::_reverseBytes_s:           n = new ReverseBytesSNode( 0,   arg);  break;
   case vmIntrinsics::_reverseBytes_i:           n = new ReverseBytesINode( 0,   arg);  break;
   case vmIntrinsics::_reverseBytes_l:           n = new ReverseBytesLNode( 0,   arg);  break;
-  case vmIntrinsics::_reverseBits_i:            n = new ReverseBitsINode( 0,   arg);  break;
+  case vmIntrinsics::_reverseBits_i:            n = new ReverseBitsINode(  0,   arg);  break;
   default:  fatal_unexpected_iid(id);  break;
   }
   set_result(_gvn.transform(n));
