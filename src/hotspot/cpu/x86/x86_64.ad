@@ -6371,9 +6371,8 @@ instruct bits_reverse_int(rRegI edi, rRegI esi, rRegI xmm0, rRegI xmm1, rRegI xm
   match(Set edi (ReverseBitsI edi));
   effect(TEMP esi, TEMP xmm0, TEMP xmm1, TEMP xmm2, TEMP xmm3);
 
-  format %{ "cesar" %}
+  format %{ "" %}
   ins_encode %{
-    printf("cesar's bits_reverse\n");
     Register Redi = $edi$$Register;
     Register Resi = $esi$$Register;
 
@@ -6397,14 +6396,15 @@ instruct bits_reverse_int(rRegI edi, rRegI esi, rRegI xmm0, rRegI xmm1, rRegI xm
     __ movdq(Rxmm3, Redi);
     __ por(Rxmm0, Rxmm3);
 
-   __ vpshufb(Rxmm1, Rxmm0, Rxmm1, Assembler::AVX_128bit);
-   __ vpshufb(Rxmm2, Rxmm0, Rxmm2, Assembler::AVX_128bit);
+    __ vpshufb(Rxmm1, Rxmm0, Rxmm1, Assembler::AVX_128bit);
+    __ vpshufb(Rxmm2, Rxmm0, Rxmm2, Assembler::AVX_128bit);
 
-   __ movdq(Resi, Rxmm1);
-   __ movdq(Redi, Rxmm2);
-   __ shlq(Resi, 4);
-   __ orq(Redi, Resi);
-   __ bswapq(Redi);
+    __ movdq(Resi, Rxmm1);
+    __ movdq(Redi, Rxmm2);
+    __ shlq(Resi, 4);
+    __ orq(Redi, Resi);
+
+    __ bswapl(Redi);
   %}
   ins_pipe( ialu_reg );
 %}
