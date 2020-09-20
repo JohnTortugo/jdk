@@ -63,4 +63,11 @@ public class Integers {
             bh.consume(Integer.parseInt(s));
         }
     }
+
+    @Benchmark
+    public void reverse(Blackhole bh) {
+        for (int i=Integer.MIN_VALUE; i<Integer.MAX_VALUE; i++) {
+            bh.consume(Integer.reverse(i));
+        }
+    }
 }
