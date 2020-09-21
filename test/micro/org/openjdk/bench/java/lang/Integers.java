@@ -24,6 +24,7 @@ package org.openjdk.bench.java.lang;
 
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
+import org.openjdk.jmh.annotations.Fork;
 import org.openjdk.jmh.annotations.Mode;
 import org.openjdk.jmh.annotations.OutputTimeUnit;
 import org.openjdk.jmh.annotations.Param;
@@ -41,6 +42,7 @@ import java.util.concurrent.TimeUnit;
 @BenchmarkMode(Mode.AverageTime)
 @OutputTimeUnit(TimeUnit.MICROSECONDS)
 @State(Scope.Thread)
+@Fork(jvmArgsAppend = "--enable-preview")
 public class Integers {
 
     @Param("500")
@@ -69,5 +71,20 @@ public class Integers {
         for (int i=Integer.MIN_VALUE; i<Integer.MAX_VALUE; i++) {
             bh.consume(Integer.reverse(i));
         }
+    }
+
+    @Benchmark
+    public void reverse_shifts(Blackhole bh) {
+        for (int i=Integer.MIN_VALUE; i<Integer.MAX_VALUE; i++) {
+            bh.consume(Integers.original_reverse(i));
+        }
+    }
+
+    private static int original_reverse(int i) {
+        i = (i & 0x55555555) << 1 | (i >>> 1) & 0x55555555;
+        i = (i & 0x33333333) << 2 | (i >>> 2) & 0x33333333;
+        i = (i & 0x0f0f0f0f) << 4 | (i >>> 4) & 0x0f0f0f0f;
+
+        return Integer.reverseBytes(i);
     }
 }
