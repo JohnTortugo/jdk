@@ -1,1 +1,0 @@
-java -XX:+UnlockExperimentalVMOptions -XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining -XX:+PrintCompilation -XX:+PrintAssembly Reverse > tmp 
