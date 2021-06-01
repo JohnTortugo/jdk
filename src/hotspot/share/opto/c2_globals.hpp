@@ -127,10 +127,6 @@
   notproduct(bool, PrintIdealNodeCount, false,                              \
           "Print liveness counts of ideal nodes")                           \
                                                                             \
-  develop(bool, IdealizedNumerics, false,                                   \
-          "Check performance difference allowing FP "                       \
-          "associativity and commutativity...")                             \
-                                                                            \
   product_pd(bool, IdealizeClearArrayNode, DIAGNOSTIC,                      \
           "Replace ClearArrayNode by subgraph of basic operations.")        \
                                                                             \
@@ -157,9 +153,6 @@
                                                                             \
   develop_pd(bool, OptoPeephole,                                            \
           "Apply peephole optimizations after register allocation")         \
-                                                                            \
-  develop(bool, OptoRemoveUseless, true,                                    \
-          "Remove useless nodes after parsing")                             \
                                                                             \
   notproduct(bool, PrintFrameConverterAssembly, false,                      \
           "Print New compiler assembly output for frame converters")        \
