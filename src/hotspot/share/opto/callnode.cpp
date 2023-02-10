@@ -1103,13 +1103,16 @@ Node* CallStaticJavaNode::Ideal(PhaseGVN* phase, bool can_reshape) {
   return CallNode::Ideal(phase, can_reshape);
 }
 
+//----------------------------is_uncommon_trap----------------------------
+// Returns true if this is an uncommon trap.
+bool CallStaticJavaNode::is_uncommon_trap() const {
+  return (_name != NULL && !strcmp(_name, "uncommon_trap"));
+}
+
 //----------------------------uncommon_trap_request----------------------------
 // If this is an uncommon trap, return the request code, else zero.
 int CallStaticJavaNode::uncommon_trap_request() const {
-  if (_name != NULL && !strcmp(_name, "uncommon_trap")) {
-    return extract_uncommon_trap_request(this);
-  }
-  return 0;
+  return is_uncommon_trap() ? extract_uncommon_trap_request(this) : 0;
 }
 int CallStaticJavaNode::extract_uncommon_trap_request(const Node* call) {
 #ifndef PRODUCT
@@ -1468,10 +1471,12 @@ SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
                                                      uint n_fields) :
   TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
   _first_index(first_index),
-  _n_fields(n_fields)
+  _n_fields(n_fields),
 #ifdef ASSERT
-  , _alloc(alloc)
+  _alloc(alloc),
 #endif
+  _merge_pointer_idx(-1),
+  _number_of_objects(1)
 {
 #ifdef ASSERT
   if (!alloc->is_Allocate()
@@ -1480,6 +1485,16 @@ SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
     assert(false, "unexpected call node");
   }
 #endif
+  init_class_id(Class_SafePointScalarObject);
+}
+
+SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp, int merge_pointer_idx, uint number_of_objects) :
+  TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
+  _first_index(0),
+  _n_fields(0),
+  _merge_pointer_idx(merge_pointer_idx),
+  _number_of_objects(number_of_objects)
+{
   init_class_id(Class_SafePointScalarObject);
 }
 

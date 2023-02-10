@@ -29,6 +29,7 @@
 #include "gc/shared/collectedHeap.hpp"
 #include "memory/universe.hpp"
 #include "oops/oop.inline.hpp"
+#include "runtime/stackValue.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/javaThread.hpp"
@@ -80,13 +81,32 @@ ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {
   return result;
 }
 
+ScopeValue* DebugInfoReadStream::read_object_merge_value() {
+  int id = read_int();
+#ifdef ASSERT
+  assert(_obj_pool != NULL, "object pool does not exist");
+  for (int i = _obj_pool->length() - 1; i >= 0; i--) {
+    assert(!_obj_pool->at(i)->is_object() || _obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
+    assert(!_obj_pool->at(i)->is_object_merge() || _obj_pool->at(i)->as_ObjectMergeValue()->id() != id, "should not be read twice");
+  }
+#endif
+  ObjectMergeValue* result = new ObjectMergeValue(id);
+  // Cache the object since an object field could reference it.
+  _obj_pool->push(result);
+  result->read_object(this);
+  return result;
+}
+
 ScopeValue* DebugInfoReadStream::get_cached_object() {
   int id = read_int();
   assert(_obj_pool != nullptr, "object pool does not exist");
   for (int i = _obj_pool->length() - 1; i >= 0; i--) {
-    ObjectValue* ov = _obj_pool->at(i)->as_ObjectValue();
-    if (ov->id() == id) {
-      return ov;
+    ScopeValue* sv = _obj_pool->at(i);
+    if (sv->is_object() && sv->as_ObjectValue()->id() == id) {
+      return sv->as_ObjectValue();
+    }
+    else if (sv->is_object_merge() && sv->as_ObjectMergeValue()->id() == id) {
+      return sv->as_ObjectMergeValue();
     }
   }
   ShouldNotReachHere();
@@ -98,7 +118,8 @@ ScopeValue* DebugInfoReadStream::get_cached_object() {
 enum { LOCATION_CODE = 0, CONSTANT_INT_CODE = 1,  CONSTANT_OOP_CODE = 2,
                           CONSTANT_LONG_CODE = 3, CONSTANT_DOUBLE_CODE = 4,
                           OBJECT_CODE = 5,        OBJECT_ID_CODE = 6,
-                          AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8 };
+                          AUTO_BOX_OBJECT_CODE = 7, MARKER_CODE = 8,
+                          OBJECT_MERGE_CODE = 9 };
 
 ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
   ScopeValue* result = nullptr;
@@ -110,6 +131,7 @@ ScopeValue* ScopeValue::read_from(DebugInfoReadStream* stream) {
    case CONSTANT_DOUBLE_CODE: result = new ConstantDoubleValue(stream);                  break;
    case OBJECT_CODE:          result = stream->read_object_value(false /*is_auto_box*/); break;
    case AUTO_BOX_OBJECT_CODE: result = stream->read_object_value(true /*is_auto_box*/);  break;
+   case OBJECT_MERGE_CODE:    result = stream->read_object_merge_value();                break;
    case OBJECT_ID_CODE:       result = stream->get_cached_object();                      break;
    case MARKER_CODE:          result = new MarkerValue();                                break;
    default: ShouldNotReachHere();
@@ -189,6 +211,68 @@ void ObjectValue::print_fields_on(outputStream* st) const {
     _field_values.at(i)->print_on(st);
   }
 #endif
+}
+
+
+// ObjectMergeValue
+ObjectValue* ObjectMergeValue::select(frame* fr, RegisterMap* reg_map) const {
+  StackValue* sv_selector = StackValue::create_stack_value(fr, reg_map, _selector);
+  jint selector = sv_selector->get_int();
+
+  if (selector != -1) {
+    ObjectValue* ov = (ObjectValue*) _possible_objects.at(selector);
+    ov->set_id(id());
+    return ov;
+  }
+  else {
+    StackValue* sv_merge_pointer = StackValue::create_stack_value(fr, reg_map, _merge_pointer);
+
+    ObjectValue* ov = new ObjectValue(id());
+    ov->set_value(sv_merge_pointer->get_obj()());
+    ov->set_skip_field_assignment();
+    return ov;
+  }
+}
+
+void ObjectMergeValue::set_value(oop value) {
+  _value = Handle(Thread::current(), value);
+}
+
+void ObjectMergeValue::read_object(DebugInfoReadStream* stream) {
+  _selector = read_from(stream);
+  _merge_pointer = read_from(stream);
+  int length = stream->read_int();
+  for (int i = 0; i < length; i++) {
+    jint object_code = stream->read_int();
+    jint id = stream->read_int();
+    ObjectValue* result = new ObjectValue(id);
+    result->read_object(stream);
+    _possible_objects.append(result);
+  }
+}
+
+void ObjectMergeValue::write_on(DebugInfoWriteStream* stream) {
+  if (is_visited()) {
+    stream->write_int(OBJECT_ID_CODE);
+    stream->write_int(_id);
+  } else {
+    set_visited(true);
+    stream->write_int(OBJECT_MERGE_CODE);
+    stream->write_int(_id);
+    _selector->write_on(stream);
+    _merge_pointer->write_on(stream);
+    int length = _possible_objects.length();
+    stream->write_int(length);
+    for (int i = 0; i < length; i++) {
+      _possible_objects.at(i)->write_on(stream);
+    }
+  }
+}
+
+void ObjectMergeValue::print_on(outputStream* st) const {
+}
+
+void ObjectMergeValue::print_fields_on(outputStream* st) const {
 }
 
 // ConstantIntValue

@@ -141,8 +141,8 @@ public:
   // branch instructions. Replace eligible long branches with short branches.
   void shorten_branches(uint* blk_starts);
   // If "objs" contains an ObjectValue whose id is "id", returns it, else NULL.
-  static ObjectValue* sv_for_node_id(GrowableArray<ScopeValue*> *objs, int id);
-  static void set_sv_for_object_node(GrowableArray<ScopeValue*> *objs, ObjectValue* sv);
+  static ScopeValue* sv_for_node_id(GrowableArray<ScopeValue*> *objs, int id);
+  static void set_sv_for_object_node(GrowableArray<ScopeValue*> *objs, ScopeValue* sv);
   void FillLocArray( int idx, MachSafePointNode* sfpt, Node *local,
                      GrowableArray<ScopeValue*> *array,
                      GrowableArray<ScopeValue*> *objs );

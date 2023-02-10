@@ -512,6 +512,8 @@ class SafePointScalarObjectNode: public TypeNode {
                      // It is relative to the last (youngest) jvms->_scloff.
   uint _n_fields;    // Number of non-static fields of the scalarized object.
   DEBUG_ONLY(Node* _alloc;)
+  int _merge_pointer_idx;
+  uint _number_of_objects;
 
   virtual uint hash() const ; // { return NO_HASH; }
   virtual bool cmp( const Node &n ) const;
@@ -524,6 +526,9 @@ public:
                             Node* alloc,
 #endif
                             uint first_index, uint n_fields);
+
+  SafePointScalarObjectNode(const TypeOopPtr* tp, int merge_pointer_idx, uint number_of_objects);
+
   virtual int Opcode() const;
   virtual uint           ideal_reg() const;
   virtual const RegMask &in_RegMask(uint) const;
@@ -541,6 +546,20 @@ public:
 #endif
 
   virtual uint size_of() const { return sizeof(*this); }
+
+  bool is_from_merge() const { return _merge_pointer_idx >= 0; }
+
+  int merge_pointer_idx(JVMState* jvms) const {
+    assert(jvms != NULL, "missed JVMS");
+    return jvms->scloff() + _merge_pointer_idx;
+  }
+
+  int selector_idx(JVMState* jvms) const {
+    assert(jvms != NULL, "missed JVMS");
+    return jvms->scloff() + _merge_pointer_idx + 1;
+  }
+
+  uint number_of_objects() const { return _number_of_objects; }
 
   // Assumes that "this" is an argument to a safepoint node "s", and that
   // "new_call" is being created to correspond to "s".  But the difference
@@ -735,6 +754,7 @@ public:
 
   // If this is an uncommon trap, return the request code, else zero.
   int uncommon_trap_request() const;
+  bool is_uncommon_trap() const;
   static int extract_uncommon_trap_request(const Node* call);
 
   bool is_boxing_method() const {

@@ -1078,8 +1078,23 @@ bool Deoptimization::realloc_objects(JavaThread* thread, frame* fr, RegisterMap*
   bool failures = false;
 
   for (int i = 0; i < objects->length(); i++) {
-    assert(objects->at(i)->is_object(), "invalid debug information");
-    ObjectValue* sv = (ObjectValue*) objects->at(i);
+    assert(objects->at(i)->is_object() || objects->at(i)->is_object_merge(), "invalid debug information");
+    ObjectValue* sv = nullptr;
+
+    if (objects->at(i)->is_object()) {
+      sv = objects->at(i)->as_ObjectValue();
+    }
+    else {
+      ObjectMergeValue* merged = objects->at(i)->as_ObjectMergeValue();
+      sv = merged->select(fr, reg_map);
+      objects->at_put(i, sv);
+
+      // Will be non-null when it's a pointer from a merge where the
+      // executed path wasn't that of a scalar replaced object.
+      if (!sv->value().is_null()) {
+        continue;
+      }
+    }
 
     Klass* k = java_lang_Class::as_Klass(sv->klass()->as_ConstantOopReadValue()->value()());
     oop obj = nullptr;
@@ -1429,6 +1444,10 @@ static int reassign_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap
 void Deoptimization::reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, bool realloc_failures, bool skip_internal) {
   for (int i = 0; i < objects->length(); i++) {
     ObjectValue* sv = (ObjectValue*) objects->at(i);
+    // We'll skip if the pointer didn't came from a scalar replaced object.
+    if (sv->skip_field_assignment()) {
+      continue;
+    }
     Klass* k = java_lang_Class::as_Klass(sv->klass()->as_ConstantOopReadValue()->value()());
     Handle obj = sv->value();
     assert(obj.not_null() || realloc_failures, "reallocation was missed");

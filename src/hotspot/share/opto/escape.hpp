@@ -164,7 +164,8 @@ public:
     ScalarReplaceable = 1,  // Not escaped object could be replaced with scalar
     PointsToUnknown   = 2,  // Has edge to phantom_object
     ArraycopySrc      = 4,  // Has edge from Arraycopy node
-    ArraycopyDst      = 8   // Has edge to Arraycopy node
+    ArraycopyDst      = 8,  // Has edge to Arraycopy node
+    Unique            = 16  // True if we can generate an unique type for this node
   } NodeFlags;
 
 
@@ -198,6 +199,8 @@ public:
   void set_arraycopy_src()       { _flags |= ArraycopySrc; }
   bool     arraycopy_dst() const { return (_flags & ArraycopyDst) != 0; }
   void set_arraycopy_dst()       { _flags |= ArraycopyDst; }
+  bool     is_unique_type()const { return (_flags & Unique) != 0;}
+  void set_not_unique_type()     { _flags &= ~Unique; }
 
   bool     scalar_replaceable() const { return (_flags & ScalarReplaceable) != 0;}
   void set_scalar_replaceable(bool set) {
@@ -461,7 +464,7 @@ private:
                                 GrowableArray<JavaObjectNode*>& non_escaped_worklist);
 
   // Adjust scalar_replaceable state after Connection Graph is built.
-  void adjust_scalar_replaceable_state(JavaObjectNode* jobj);
+  void adjust_scalar_replaceable_state(JavaObjectNode* jobj, Unique_Node_List &reducible_merges);
 
   // Propagate NSR (Not scalar replaceable) state.
   void find_scalar_replaceable_allocs(GrowableArray<JavaObjectNode*>& jobj_worklist);
@@ -473,7 +476,7 @@ private:
   const TypeInt* optimize_ptr_compare(Node* n);
 
   // Returns unique corresponding java object or NULL.
-  JavaObjectNode* unique_java_object(Node *n);
+  JavaObjectNode* unique_java_object(Node *n) const;
 
   // Add an edge of the specified type pointing to the specified target.
   bool add_edge(PointsToNode* from, PointsToNode* to) {
@@ -533,7 +536,8 @@ private:
   // Propagate unique types created for non-escaped allocated objects through the graph
   void split_unique_types(GrowableArray<Node *>  &alloc_worklist,
                           GrowableArray<ArrayCopyNode*> &arraycopy_worklist,
-                          GrowableArray<MergeMemNode*> &mergemem_worklist);
+                          GrowableArray<MergeMemNode*> &mergemem_worklist,
+                          Unique_Node_List &reducible_merges);
 
   // Helper methods for unique types split.
   bool split_AddP(Node *addp, Node *base);
@@ -577,6 +581,29 @@ private:
 
   // Compute the escape information
   bool compute_escape();
+
+  // -------------------------------------------
+  // Methods related to Reduce Allocation Merges
+
+  // Returns true if there is a Store node dominated by
+  // 'merge_phi_region' for which the associated AddP uses
+  // 'base' as Base.
+  bool is_read_only(Node* merge_phi_region, Node* base) const;
+
+  bool can_reduce_this_phi(PhiNode* phi) const;
+  bool can_reduce_this_phi_users(PhiNode* phi) const;
+  bool can_reduce_this_phi_inputs(PhiNode* phi) const;
+
+  Node* find_memory_phi(Node* region, const TypeOopPtr* base_t, ciField* field);
+  Node* create_selector(PhiNode* ophi);
+
+  void reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_Node_List* safepoints);
+  void reduce_this_phi(LocalVarNode* var);
+
+  void set_not_unique_type(PointsToNode* ptn NOT_PRODUCT(COMMA const char* reason)) const {
+    ptn->set_not_unique_type();
+    set_not_scalar_replaceable(ptn NOT_PRODUCT(COMMA reason));
+  }
 
   void set_not_scalar_replaceable(PointsToNode* ptn NOT_PRODUCT(COMMA const char* reason)) const {
 #ifndef PRODUCT
@@ -652,7 +679,7 @@ inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, 
   _edges(CG->_compile->comp_arena(), 2, 0, NULL),
   _uses (CG->_compile->comp_arena(), 2, 0, NULL),
   _type((u1)type),
-  _flags(ScalarReplaceable),
+  _flags(Unique | ScalarReplaceable),
   _escape((u1)es),
   _fields_escape((u1)es),
   _node(n),
