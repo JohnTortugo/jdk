@@ -71,7 +71,8 @@ ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {
 #ifdef ASSERT
   assert(_obj_pool != nullptr, "object pool does not exist");
   for (int i = _obj_pool->length() - 1; i >= 0; i--) {
-    assert(_obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
+    assert(!_obj_pool->at(i)->is_object() || _obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
+    assert(!_obj_pool->at(i)->is_object_merge() || _obj_pool->at(i)->as_ObjectMergeValue()->id() != id, "should not be read twice");
   }
 #endif
   ObjectValue* result = is_auto_box ? new AutoBoxObjectValue(id) : new ObjectValue(id);
@@ -243,11 +244,11 @@ void ObjectMergeValue::read_object(DebugInfoReadStream* stream) {
   _merge_pointer = read_from(stream);
   int length = stream->read_int();
   for (int i = 0; i < length; i++) {
-    jint object_code = stream->read_int();
-    jint id = stream->read_int();
-    ObjectValue* result = new ObjectValue(id);
-    result->read_object(stream);
-    _possible_objects.append(result);
+    ScopeValue* result = read_from(stream);
+    assert(result->is_object(), "Candidate is not an object!");
+    ObjectValue* obj = result->as_ObjectValue();
+    obj->set_merge_candidate();
+    _possible_objects.append(obj);
   }
 }
 
@@ -264,7 +265,7 @@ void ObjectMergeValue::write_on(DebugInfoWriteStream* stream) {
     int length = _possible_objects.length();
     stream->write_int(length);
     for (int i = 0; i < length; i++) {
-      _possible_objects.at(i)->write_on(stream);
+      _possible_objects.at(i)->as_ObjectValue()->write_on(stream);
     }
   }
 }

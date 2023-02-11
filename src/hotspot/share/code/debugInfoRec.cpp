@@ -359,7 +359,11 @@ void DebugInformationRecorder::dump_object_pool(GrowableArray<ScopeValue*>* obje
         sv->as_ObjectValue()->set_visited(false);
       }
       else if (sv->is_object_merge()) {
-        sv->as_ObjectMergeValue()->set_visited(false);
+        ObjectMergeValue* obj = sv->as_ObjectMergeValue();
+        obj->set_visited(false);
+        for (int j = 0; j < obj->possible_objects()->length(); j++) {
+          obj->possible_objects()->at(j)->as_ObjectValue()->set_visited(false);
+        }
       }
       else {
         assert(false, "unknown type.");

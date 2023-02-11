@@ -133,6 +133,7 @@ class ObjectValue: public ScopeValue {
   GrowableArray<ScopeValue*> _field_values;
   Handle                     _value;
   bool                       _visited;
+  bool                       _merge_candidate;
   bool                       _skip_field_assignment;
  public:
   ObjectValue(int id, ScopeValue* klass)
@@ -141,6 +142,7 @@ class ObjectValue: public ScopeValue {
      , _field_values()
      , _value()
      , _visited(false)
+     , _merge_candidate(false)
      , _skip_field_assignment(false) {
     assert(klass->is_constant_oop(), "should be constant java mirror oop");
   }
@@ -151,6 +153,7 @@ class ObjectValue: public ScopeValue {
      , _field_values()
      , _value()
      , _visited(false)
+     , _merge_candidate(false)
      , _skip_field_assignment(false) {}
 
   // Accessors
@@ -162,11 +165,13 @@ class ObjectValue: public ScopeValue {
   int                         field_size()                   { return _field_values.length(); }
   Handle                      value() const                  { return _value; }
   bool                        is_visited() const             { return _visited; }
+  bool                        is_merge_candidate() const     { return _merge_candidate; }
   bool                        skip_field_assignment() const  { return _skip_field_assignment; }
 
   void                        set_id(int id)                 { _id = id; }
   void                        set_value(oop value);
   void                        set_visited(bool visited)      { _visited = visited; }
+  void                        set_merge_candidate()          { _merge_candidate = true; }
   void                        set_skip_field_assignment()    { _skip_field_assignment = true; }
 
   // Serialization of debugging information

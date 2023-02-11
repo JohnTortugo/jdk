@@ -164,8 +164,7 @@ public:
     ScalarReplaceable = 1,  // Not escaped object could be replaced with scalar
     PointsToUnknown   = 2,  // Has edge to phantom_object
     ArraycopySrc      = 4,  // Has edge from Arraycopy node
-    ArraycopyDst      = 8,  // Has edge to Arraycopy node
-    Unique            = 16  // True if we can generate an unique type for this node
+    ArraycopyDst      = 8   // Has edge to Arraycopy node
   } NodeFlags;
 
 
@@ -199,8 +198,6 @@ public:
   void set_arraycopy_src()       { _flags |= ArraycopySrc; }
   bool     arraycopy_dst() const { return (_flags & ArraycopyDst) != 0; }
   void set_arraycopy_dst()       { _flags |= ArraycopyDst; }
-  bool     is_unique_type()const { return (_flags & Unique) != 0;}
-  void set_not_unique_type()     { _flags &= ~Unique; }
 
   bool     scalar_replaceable() const { return (_flags & ScalarReplaceable) != 0;}
   void set_scalar_replaceable(bool set) {
@@ -600,11 +597,6 @@ private:
   void reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_Node_List* safepoints);
   void reduce_this_phi(LocalVarNode* var);
 
-  void set_not_unique_type(PointsToNode* ptn NOT_PRODUCT(COMMA const char* reason)) const {
-    ptn->set_not_unique_type();
-    set_not_scalar_replaceable(ptn NOT_PRODUCT(COMMA reason));
-  }
-
   void set_not_scalar_replaceable(PointsToNode* ptn NOT_PRODUCT(COMMA const char* reason)) const {
 #ifndef PRODUCT
     if (_compile->directive()->TraceEscapeAnalysisOption) {
@@ -679,7 +671,7 @@ inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, 
   _edges(CG->_compile->comp_arena(), 2, 0, NULL),
   _uses (CG->_compile->comp_arena(), 2, 0, NULL),
   _type((u1)type),
-  _flags(Unique | ScalarReplaceable),
+  _flags(ScalarReplaceable),
   _escape((u1)es),
   _fields_escape((u1)es),
   _node(n),
