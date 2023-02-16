@@ -56,13 +56,13 @@ ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation
   // Add unknown java object.
   add_java_object(C->top(), PointsToNode::GlobalEscape);
   phantom_obj = ptnode_adr(C->top()->_idx)->as_JavaObject();
-  set_not_scalar_replaceable(phantom_obj, "Phantom object");
+  set_not_scalar_replaceable(phantom_obj NOT_PRODUCT(COMMA "Phantom object"));
   // Add ConP(#NULL) and ConN(#NULL) nodes.
   Node* oop_null = igvn->zerocon(T_OBJECT);
   assert(oop_null->_idx < nodes_size(), "should be created already");
   add_java_object(oop_null, PointsToNode::NoEscape);
   null_obj = ptnode_adr(oop_null->_idx)->as_JavaObject();
-  set_not_scalar_replaceable(null_obj, "Null object");
+  set_not_scalar_replaceable(null_obj NOT_PRODUCT(COMMA "Null object"));
   if (UseCompressedOops) {
     Node* noop_null = igvn->zerocon(T_NARROWOOP);
     assert(noop_null->_idx < nodes_size(), "should be created already");
@@ -543,13 +543,16 @@ Node* ConnectionGraph::find_memory_phi(Node* region, const TypeOopPtr* base_t, c
   Node* bot_memory        = NULL;
 
   for (DUIterator_Fast imax, i = region->fast_outs(imax); i < imax; i++) {
-    Node* memory = region->fast_out(i);
-    int idx = _compile->get_alias_index(memory->adr_type());
-    if (memory->is_Phi() && idx == alias_idx) {
-      return memory;
-    }
-    if (idx == Compile::AliasIdxBot) {
-      bot_memory = memory;
+    Node* n = region->fast_out(i);
+    if (n->is_Phi() && n->bottom_type() == Type::MEMORY) {
+      int idx = _compile->get_alias_index(n->adr_type());
+      if (idx == alias_idx) {
+        return n;
+      }
+      if (idx == Compile::AliasIdxBot) {
+        assert(bot_memory == NULL, "Two Phi#Bot");
+        bot_memory = n;
+      }
     }
   }
 
@@ -884,7 +887,7 @@ void ConnectionGraph::add_node_to_connection_graph(Node *n, Unique_Node_List *de
         es = PointsToNode::GlobalEscape;
       }
       PointsToNode* ptn_con = add_java_object(n, es);
-      set_not_scalar_replaceable(ptn_con, "Constant pointer");
+      set_not_scalar_replaceable(ptn_con NOT_PRODUCT(COMMA "Constant pointer"));
       break;
     }
     case Op_CreateEx: {
@@ -974,7 +977,7 @@ void ConnectionGraph::add_node_to_connection_graph(Node *n, Unique_Node_List *de
     }
     case Op_ThreadLocal: {
       PointsToNode* ptn_thr = add_java_object(n, PointsToNode::ArgEscape);
-      set_not_scalar_replaceable(ptn_thr, "Constant pointer");
+      set_not_scalar_replaceable(ptn_thr NOT_PRODUCT(COMMA "Constant pointer"));
       break;
     }
     case Op_Blackhole: {
