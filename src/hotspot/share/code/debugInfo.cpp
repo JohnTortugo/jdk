@@ -92,7 +92,6 @@ ScopeValue* DebugInfoReadStream::read_object_merge_value() {
   }
 #endif
   ObjectMergeValue* result = new ObjectMergeValue(id);
-  // Cache the object since an object field could reference it.
   _obj_pool->push(result);
   result->read_object(this);
   return result;
@@ -105,8 +104,7 @@ ScopeValue* DebugInfoReadStream::get_cached_object() {
     ScopeValue* sv = _obj_pool->at(i);
     if (sv->is_object() && sv->as_ObjectValue()->id() == id) {
       return sv->as_ObjectValue();
-    }
-    else if (sv->is_object_merge() && sv->as_ObjectMergeValue()->id() == id) {
+    } else if (sv->is_object_merge() && sv->as_ObjectMergeValue()->id() == id) {
       return sv->as_ObjectMergeValue();
     }
   }
@@ -216,22 +214,42 @@ void ObjectValue::print_fields_on(outputStream* st) const {
 
 
 // ObjectMergeValue
-ObjectValue* ObjectMergeValue::select(frame* fr, RegisterMap* reg_map) const {
+ObjectValue* ObjectMergeValue::select(frame* fr, RegisterMap* reg_map) {
   StackValue* sv_selector = StackValue::create_stack_value(fr, reg_map, _selector);
   jint selector = sv_selector->get_int();
 
-  if (selector != -1) {
-    ObjectValue* ov = (ObjectValue*) _possible_objects.at(selector);
-    ov->set_id(id());
-    return ov;
-  }
-  else {
+  // If the selector is '-1' it means that execution followed the path
+  // where no scalar replacement happened.
+  // Otherwise, it is the index of _possible_objects array that holds
+  // the description of the scalar replaced object.
+  if (selector == -1) {
     StackValue* sv_merge_pointer = StackValue::create_stack_value(fr, reg_map, _merge_pointer);
+    _selected = new ObjectValue(id());
 
-    ObjectValue* ov = new ObjectValue(id());
-    ov->set_value(sv_merge_pointer->get_obj()());
-    ov->set_skip_field_assignment();
-    return ov;
+    // Retrieve the pointer to the real object and use it as if we had
+    // allocated it during the deoptimization
+    _selected->set_value(sv_merge_pointer->get_obj()());
+
+    // No need for field assignment as the object wasn't really scalar replaced
+    _selected->set_skip_field_assignment();
+
+    return _selected;
+  } else {
+    _selected = (ObjectValue*) _possible_objects.at(selector);
+
+    // Exchange the id of the selected object and the merge object.
+    // I.e., the candidate essentially becomes the real deal.
+    int tmp = _selected->id();
+    _selected->set_id(id());
+    _id = tmp;
+
+    // Candidate is not candidate anymore, it's the real object
+    _selected->set_merge_candidate(false);
+
+    // Returns NULL and that should indicate to the caller that
+    // one of the candidate objects, inside this merge, became
+    // a real object.
+    return NULL;
   }
 }
 
@@ -247,7 +265,7 @@ void ObjectMergeValue::read_object(DebugInfoReadStream* stream) {
     ScopeValue* result = read_from(stream);
     assert(result->is_object(), "Candidate is not an object!");
     ObjectValue* obj = result->as_ObjectValue();
-    obj->set_merge_candidate();
+    obj->set_merge_candidate(true);
     _possible_objects.append(obj);
   }
 }

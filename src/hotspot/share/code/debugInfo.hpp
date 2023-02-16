@@ -171,7 +171,7 @@ class ObjectValue: public ScopeValue {
   void                        set_id(int id)                 { _id = id; }
   void                        set_value(oop value);
   void                        set_visited(bool visited)      { _visited = visited; }
-  void                        set_merge_candidate()          { _merge_candidate = true; }
+  void                        set_merge_candidate(bool cnd)  { _merge_candidate = cnd; }
   void                        set_skip_field_assignment()    { _skip_field_assignment = true; }
 
   // Serialization of debugging information
@@ -192,6 +192,7 @@ protected:
   ScopeValue*                _selector;
   ScopeValue*                _merge_pointer;
   GrowableArray<ScopeValue*> _possible_objects;
+  ObjectValue*               _selected;
   Handle                     _value;
   bool                       _visited;
 public:
@@ -199,6 +200,7 @@ public:
      : _id(id)
      , _selector(selector)
      , _merge_pointer(merge_pointer)
+     , _selected(NULL)
      , _value()
      , _visited(false) {}
 
@@ -206,6 +208,7 @@ public:
      : _id(id)
      , _selector(NULL)
      , _merge_pointer(NULL)
+     , _selected(NULL)
      , _value()
      , _visited(false) {}
 
@@ -216,7 +219,8 @@ public:
   GrowableArray<ScopeValue*>* possible_objects()              { return &_possible_objects; }
   Handle                      value() const                   { return _value; }
   bool                        is_visited() const              { return _visited; }
-  ObjectValue*                select(frame* fr, RegisterMap* reg_map) const ;
+  ObjectValue*                select(frame* fr, RegisterMap* reg_map) ;
+  ObjectValue*                selected()                      { assert(_selected != NULL, "not yet."); return _selected; };
 
   void                        set_value(oop value);
   void                        set_visited(bool visited)       { _visited = visited; }

@@ -188,8 +188,7 @@ static void print_objects(JavaThread* deoptee_thread,
 
     if (objects->at(i)->is_object()) {
       sv = objects->at(i)->as_ObjectValue();
-    }
-    else if (objects->at(i)->is_object_merge()) {
+    } else if (objects->at(i)->is_object_merge()) {
       ObjectMergeValue* merged = objects->at(i)->as_ObjectMergeValue();
       sv = merged->select(frame, reg_map);
     }
@@ -1094,15 +1093,20 @@ bool Deoptimization::realloc_objects(JavaThread* thread, frame* fr, RegisterMap*
     if (objects->at(i)->is_object()) {
       sv = objects->at(i)->as_ObjectValue();
 
-      // This object is only a candidate inside a ObjectMergeValue
+      // This object is only a candidate inside an ObjectMergeValue
       if (sv->is_merge_candidate()) {
         continue;
       }
-    }
-    else {
+    } else {
       ObjectMergeValue* merged = objects->at(i)->as_ObjectMergeValue();
       sv = merged->select(fr, reg_map);
-      objects->at_put(i, sv);
+
+      // If this is true it means that a candidate object became a
+      // real object and we are going to reach that object in a later
+      // iteration of the outer loop.
+      if (sv == NULL) {
+        continue;
+      }
 
       // Will be non-null when it's a pointer from a merge where the
       // executed path is of an object NOT scalar replaced.
@@ -1458,12 +1462,25 @@ static int reassign_fields_by_klass(InstanceKlass* klass, frame* fr, RegisterMap
 // restore fields of all eliminated objects and arrays
 void Deoptimization::reassign_fields(frame* fr, RegisterMap* reg_map, GrowableArray<ScopeValue*>* objects, bool realloc_failures, bool skip_internal) {
   for (int i = 0; i < objects->length(); i++) {
-    ObjectValue* sv = (ObjectValue*) objects->at(i);
-    // We'll skip if the pointer didn't came from a scalar replaced object
-    // of if the sv is a member of an ObjectMergeValue
-    if (sv->skip_field_assignment() || sv->is_merge_candidate()) {
+    assert(objects->at(i)->is_object() || objects->at(i)->is_object_merge(), "invalid debug information");
+    ObjectValue* sv = nullptr;
+
+    if (objects->at(i)->is_object()) {
+      sv = objects->at(i)->as_ObjectValue();
+
+      // If the object is only a candidate inside an ObjectMergeValue we
+      // skip processing it.
+      //
+      // If the pointer didn't came from a scalar replaced object then
+      // we don't need to do field reassignment.
+      if (sv->is_merge_candidate() || sv->skip_field_assignment()) {
+        continue;
+      }
+    } else {
+      // Merge objects should have been processed during object reallocation
       continue;
     }
+
     Klass* k = java_lang_Class::as_Klass(sv->klass()->as_ConstantOopReadValue()->value()());
     Handle obj = sv->value();
     assert(obj.not_null() || realloc_failures, "reallocation was missed");

@@ -361,7 +361,7 @@ private:
 
   // Add nodes to ConnectionGraph.
   void add_local_var(Node* n, PointsToNode::EscapeState es);
-  void add_java_object(Node* n, PointsToNode::EscapeState es);
+  PointsToNode* add_java_object(Node* n, PointsToNode::EscapeState es);
   void add_field(Node* n, PointsToNode::EscapeState es, int offset);
   void add_arraycopy(Node* n, PointsToNode::EscapeState es, PointsToNode* src, PointsToNode* dst);
 
@@ -442,6 +442,10 @@ private:
         NOT_PRODUCT(trace_es_update_helper(ptn, esc, true, reason));
         ptn->set_fields_escape_state(esc);
       }
+
+      if (esc != PointsToNode::NoEscape) {
+        ptn->set_scalar_replaceable(false);
+      }
     }
   }
   void set_fields_escape_state(PointsToNode* ptn, PointsToNode::EscapeState esc
@@ -451,6 +455,10 @@ private:
       if (ptn->fields_escape_state() < esc) {
         NOT_PRODUCT(trace_es_update_helper(ptn, esc, true, reason));
         ptn->set_fields_escape_state(esc);
+      }
+
+      if (esc != PointsToNode::NoEscape) {
+        ptn->set_scalar_replaceable(false);
       }
     }
   }
@@ -587,7 +595,7 @@ private:
   // 'base' as Base.
   bool is_read_only(Node* merge_phi_region, Node* base) const;
 
-  bool can_reduce_this_phi(PhiNode* phi) const;
+  bool can_reduce_this_phi(PointsToNode* var) const;
   bool can_reduce_this_phi_users(PhiNode* phi) const;
   bool can_reduce_this_phi_inputs(PhiNode* phi) const;
 

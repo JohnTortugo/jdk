@@ -714,14 +714,12 @@ PhaseOutput::sv_for_node_id(GrowableArray<ScopeValue*> *objs, int id) {
       if (sv->id() == id) {
         return sv;
       }
-    }
-    else if (objs->at(i)->is_object_merge()) {
+    } else if (objs->at(i)->is_object_merge()) {
       ObjectMergeValue* sv = (ObjectMergeValue*) objs->at(i);
       if (sv->id() == id) {
         return sv;
       }
-    }
-    else {
+    } else {
       assert(false, "corrupt object cache");
     }
   }
@@ -778,8 +776,7 @@ void PhaseOutput::FillLocArray( int idx, MachSafePointNode* sfpt, Node *local,
       }
 
       array->append(sv);
-    }
-    else if (spobj->is_from_merge()) {
+    } else if (spobj->is_from_merge()) {
       ObjectMergeValue* sv = (ObjectMergeValue*) sv_for_node_id(objs, spobj->_idx);
       if (sv == NULL) {
         GrowableArray<ScopeValue*> deps;
