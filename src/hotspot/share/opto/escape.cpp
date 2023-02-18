@@ -36,6 +36,7 @@
 #include "opto/cfgnode.hpp"
 #include "opto/compile.hpp"
 #include "opto/escape.hpp"
+#include "opto/macro.hpp"
 #include "opto/phaseX.hpp"
 #include "opto/movenode.hpp"
 #include "opto/rootnode.hpp"
@@ -455,7 +456,6 @@ bool ConnectionGraph::is_read_only(Node* merge_phi_region, Node* base) const {
 }
 
 bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
-  // ---------------------------------------------------------------------------
   // Check if there is an scalar replaceable allocate in the Phi
   bool found_sr_allocate = false;
 
@@ -467,6 +467,7 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
       found_sr_allocate = true;
     }
 
+    // Right now we can't restore a "null" pointer during deoptimization
     if (_igvn->type(phi->in(i))->maybe_null()) {
       NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d. Input %d is nullable.", phi->_idx, i);)
       return false;
@@ -478,7 +479,6 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
     return false;
   }
 
-  // ---------------------------------------------------------------------------
   // Check if there is no write to the input after it is merged.
   // If there is a write to any input after the merge we need to bail out.
   for (uint in_idx = 1; in_idx < phi->req(); in_idx++) {
@@ -513,7 +513,7 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
   assert(var->escape_state() == PointsToNode::NoEscape, "Phi should be NoEscape");
 
   PhiNode* phi = var->ideal_node()->as_Phi();
-  const Type* phi_t  = _igvn->type(phi);
+  const Type* phi_t = _igvn->type(phi);
   if (phi_t == NULL || phi_t->isa_instptr() == NULL) {
     return false;
   }
@@ -592,6 +592,8 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
   // Update the debug information of all safepoints in turn
   for (uint spi = 0; spi < safepoints->size(); spi++ ) {
     Node* call               = safepoints->at(spi);
+    Node* ctrl               = call->in(TypeFunc::Control);
+    Node* memory             = call->in(TypeFunc::Memory);
     JVMState *jvms           = call->jvms();
     uint scalar_fields_index = (call->req() - jvms->scloff());
     int debug_start          = jvms->debug_start();
@@ -612,21 +614,23 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
         continue;
       }
 
-      const TypeOopPtr* base_t = _igvn->type(base)->make_oopptr();
-      ciInstanceKlass* iklass  = base_t->is_instptr()->instance_klass();
-      int nfields              = iklass->nof_nonstatic_fields();
-      Node* base_klass_node    = ptn->ideal_node()->as_Allocate()->in(AllocateNode::KlassNode);
+      const TypeOopPtr* base_t   = _igvn->type(base)->make_oopptr();
+      ciInstanceKlass* iklass    = base_t->is_instptr()->instance_klass();
+      int nfields                = iklass->nof_nonstatic_fields();
+      AllocateNode* alloc        = ptn->ideal_node()->as_Allocate();
+      Node* ccpp                 = alloc->result_cast();
+      const TypeOopPtr* res_type = _igvn->type(ccpp)->isa_oopptr();
+      Node* base_klass_node      = alloc->in(AllocateNode::KlassNode);
       assert(base_klass_node != NULL, "This shouldn't happen.");
 
       call->add_req(base_klass_node);
 
       for (int j = 0; j < nfields; j++) {
         ciField* field            = iklass->nonstatic_field_at(j);
-        Node* addp                = _igvn->transform(new AddPNode(base, base, _igvn->MakeConX(field->offset())));
-        const TypePtr* adr_type   = addp->bottom_type()->is_ptr();
         ciType* elem_type         = field->type();
         BasicType basic_elem_type = field->layout_type();
         const Type* field_type    = NULL;
+        const TypeOopPtr *field_adr_type = res_type->add_offset(field->offset())->isa_oopptr();
 
         if (is_reference_type(basic_elem_type)) {
           if (!elem_type->is_loaded()) {
@@ -643,22 +647,10 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
           field_type = Type::get_const_basic_type(basic_elem_type);
         }
 
-        Node* memory = find_memory_phi(ophi->region(), base_t, field);
-        Node* dummy = _igvn->transform(ConNode::make(Type::get_zero_type(basic_elem_type)));
+        Node* field_val = PhaseMacroExpand::value_from_mem(_compile, _igvn, memory, ctrl, basic_elem_type, field_type, field_adr_type, alloc);
+        assert(field_val != NULL, "field_val is NULL");
 
-        // 'decode_narrow' is set to false because consumers of the return of this
-        // method expect a Load to be returned.  The returned Load from this method
-        // uses an specific base and it will be used to replace a Load where the
-        // [AddP] base is a Phi. If the returned Load is a 'LoadN' then so was the
-        // original Load.
-        Node* load = memory == NULL ? dummy :
-                      _igvn->transform(LoadNode::make(*_igvn, ophi->region()->in(i), memory->in(i), addp, adr_type, field_type, basic_elem_type, MemNode::unordered,
-                                       LoadNode::DependsOnlyOnTest, false, false, false, false, (uint8_t)0U, /*decode_narrow*/false));
-        Node* field_load_phi = PhiNode::make(ophi->region(), dummy, field_type, NULL);
-
-        field_load_phi->set_req(i, load);
-        call->add_req(field_load_phi);
-        _igvn->register_new_node_with_optimizer(field_load_phi);
+        call->add_req(field_val);
       }
 
       JVMState *jvms = call->jvms();

@@ -1536,8 +1536,8 @@ SafePointScalarObjectNode::clone(Dict* sosn_map, bool& new_node) const {
 
 #ifndef PRODUCT
 void SafePointScalarObjectNode::dump_spec(outputStream *st) const {
-  st->print(" # fields@[%d..%d]", first_index(),
-             first_index() + n_fields() - 1);
+  st->print(" # fields@[%d..%d], ", first_index(), first_index() + n_fields() - 1);
+  st->print("merge_ptr_idx=%d, number_of_objects=%d", _merge_pointer_idx, _number_of_objects);
 }
 
 #endif

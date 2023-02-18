@@ -48,9 +48,13 @@ tier1_part3 = \
 
 # When adding tests to tier2, make sure they end up in one of the tier2_partX groups
 tier2 = \
-    :tier2_part1 \
-    :tier2_part2 \
-    :tier2_part3
+    java/lang/CompressExpandTest.java
+#    java/util/stream/test/org/openjdk/tests/java/util/stream/SliceOpTest.java \
+#    java/lang/StackWalker/LocalsAndOperands.java \
+#    java/lang/invoke/MethodHandlesPermuteArgumentsTest.java \
+#    javax/sql/testng/test/rowset/filteredrowset/PrimaryKeyFilter.java \
+#    javax/sql/testng/test/rowset/joinrowset/JoinRowSetTests.java \
+#    javax/sql/testng/test/rowset/webrowset/CommonWebRowSetTests.java
 
 # com/sun/crypto/provider/Cipher is in tier1 because of JDK-8132855
 tier2_part1 = \

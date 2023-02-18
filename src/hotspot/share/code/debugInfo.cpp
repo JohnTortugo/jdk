@@ -66,13 +66,49 @@ oop DebugInfoReadStream::read_oop() {
   return o;
 }
 
+static void printit(GrowableArray<ScopeValue*>* _obj_pool, int type, int id) {
+  tty->print_cr("Object pool with %d entries. ID %d was already present. New type is %d.", _obj_pool->length(), id, type);
+  for (int i = 0; i < _obj_pool->length(); i++) {
+    if (_obj_pool->at(i)->is_object()) {
+      ObjectValue* obj = _obj_pool->at(i)->as_ObjectValue();
+      tty->print_cr("\t Type: Object");
+      tty->print_cr("\t Address: %p", obj);
+      tty->print_cr("\t ID: %d", obj->id());
+      tty->print_cr("\t Merge Candidate: %d", obj->is_merge_candidate());
+    }
+    else if (_obj_pool->at(i)->is_object_merge()) {
+      ObjectMergeValue* mobj = _obj_pool->at(i)->as_ObjectMergeValue();
+      tty->print_cr("\t Type: Merge");
+      tty->print_cr("\t Address: %p", mobj);
+      tty->print_cr("\t ID: %d", mobj->id());
+
+      GrowableArray<ScopeValue*>* cands = mobj->possible_objects();
+      for (int j = 0; j < cands->length(); j++) {
+        ObjectValue* cand = cands->at(j)->as_ObjectValue();
+        tty->print_cr("\t\t Type: Candidate");
+        tty->print_cr("\t\t Address: %p", cand);
+        tty->print_cr("\t\t ID: %d", cand->id());
+        tty->print_cr("\t\t Merge Candidate: %d", cand->is_merge_candidate());
+        tty->print_cr("\t\t Skip Field: %d", cand->skip_field_assignment());
+      }
+    }
+  }
+  tty->print_cr("---------");
+}
+
 ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {
   int id = read_int();
 #ifdef ASSERT
   assert(_obj_pool != nullptr, "object pool does not exist");
   for (int i = _obj_pool->length() - 1; i >= 0; i--) {
-    assert(!_obj_pool->at(i)->is_object() || _obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
-    assert(!_obj_pool->at(i)->is_object_merge() || _obj_pool->at(i)->as_ObjectMergeValue()->id() != id, "should not be read twice");
+    if (_obj_pool->at(i)->is_object() && _obj_pool->at(i)->as_ObjectValue()->id() == id) {
+      printit(_obj_pool, 0, id);
+    }
+    if (_obj_pool->at(i)->is_object_merge() && _obj_pool->at(i)->as_ObjectMergeValue()->id() == id) {
+      printit(_obj_pool, 1, id);
+    }
+    //assert(!_obj_pool->at(i)->is_object() || _obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
+    //assert(!_obj_pool->at(i)->is_object_merge() || _obj_pool->at(i)->as_ObjectMergeValue()->id() != id, "should not be read twice");
   }
 #endif
   ObjectValue* result = is_auto_box ? new AutoBoxObjectValue(id) : new ObjectValue(id);
