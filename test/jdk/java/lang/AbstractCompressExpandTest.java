@@ -158,6 +158,7 @@ public abstract class AbstractCompressExpandTest {
         int size = 64 * (64 + 1) / 2 + 1; // 2080 + 1
         long[] masks = new long[size];
 
+
         int i = 0;
         masks[i++] = 0L;
         for (int len = 1; len < 64; len++) {
@@ -170,6 +171,7 @@ public abstract class AbstractCompressExpandTest {
         assert i == masks.length;
         return masks;
     }
+
 
     @Test(dataProvider = "maskIntProvider")
     public void testCompressInt(Supplier<int[]> maskProvider) {
@@ -359,6 +361,15 @@ public abstract class AbstractCompressExpandTest {
         int mbc = Integer.bitCount(mask);
         if (mbc != 32) {
             return i & ((1 << mbc) - 1);
+        } else {
+            return i;
+        }
+    }
+
+    static long normalizeCompressedValue(long i, long mask) {
+        int mbc = Long.bitCount(mask);
+        if (mbc != 64) {
+            return i & ((1L << mbc) - 1);
         } else {
             return i;
         }

@@ -5402,6 +5402,7 @@ bool PhaseIdealLoop::verify_dominance(Node* n, Node* use, Node* LCA, Node* early
     Node* d = LCA;
     while (d != early) {
       if (d == C->root()) {
+        dump_bad_graph("Bad graph detected in compute_lca_of_uses", n, early, LCA);
         tty->print_cr("*** Use %d isn't dominated by def %d ***", use->_idx, n->_idx);
         had_error = true;
         break;
