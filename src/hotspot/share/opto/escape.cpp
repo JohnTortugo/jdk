@@ -522,7 +522,7 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
     return false;
   }
 
-  NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can reduce this Phi %d during invocation %d", phi->_idx, _invocation);)
+  NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("Can reduce this Phi during invocation %d: ", _invocation); phi->dump(); })
   return true;
 }
 
@@ -570,112 +570,118 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
 
   _igvn->hash_delete(ophi);
 
-  // Fill in the 'selector' Phi. If index 'i' of the selector is:
-  // -> a '-1' constant, the i'th input of the original Phi is NSR.
-  // -> a 'x' constant >=0, the i'th input of of original Phi will be SR and the
-  //    info about the scalarized object will be at index x of
-  //    ObjectMergeValue::possible_objects
-  for (uint i = 1; i < ophi->req(); i++) {
-    Node* base          = ophi->in(i);
-    JavaObjectNode* ptn = unique_java_object(base);
+ // Fill in the 'selector' Phi. If index 'i' of the selector is:
+ // -> a '-1' constant, the i'th input of the original Phi is NSR.
+ // -> a 'x' constant >=0, the i'th input of of original Phi will be SR and the
+ //    info about the scalarized object will be at index x of
+ //    ObjectMergeValue::possible_objects
+ for (uint i = 1; i < ophi->req(); i++) {
+   Node* base          = ophi->in(i);
+   JavaObjectNode* ptn = unique_java_object(base);
 
-    if (ptn == NULL || !ptn->scalar_replaceable()) {
-      selector->set_req(i, minus_one);
-    }
-    else {
-      Node* sr_obj_idx = _igvn->register_new_node_with_optimizer(ConINode::make(number_of_sr_objects));
-      selector->set_req(i, sr_obj_idx);
-      number_of_sr_objects++;
-    }
-  }
+   if (ptn == NULL || !ptn->scalar_replaceable()) {
+     selector->set_req(i, minus_one);
+   }
+   else {
+     Node* sr_obj_idx = _igvn->register_new_node_with_optimizer(ConINode::make(number_of_sr_objects));
+     selector->set_req(i, sr_obj_idx);
+     number_of_sr_objects++;
+   }
+ }
 
-  // Update the debug information of all safepoints in turn
-  for (uint spi = 0; spi < safepoints->size(); spi++ ) {
-    Node* call               = safepoints->at(spi);
-    Node* ctrl               = call->in(TypeFunc::Control);
-    Node* memory             = call->in(TypeFunc::Memory);
-    JVMState *jvms           = call->jvms();
-    uint scalar_fields_index = (call->req() - jvms->scloff());
-    int debug_start          = jvms->debug_start();
-    int debug_end            = jvms->debug_end();
+ // Update the debug information of all safepoints in turn
+ for (uint spi = 0; spi < safepoints->size(); spi++ ) {
+   Node* call               = safepoints->at(spi);
+   Node* ctrl               = call->in(TypeFunc::Control);
+   Node* memory             = call->in(TypeFunc::Memory);
+   JVMState *jvms           = call->jvms();
+   uint scalar_fields_index = (call->req() - jvms->scloff());
+   int debug_start          = jvms->debug_start();
+   int debug_end            = jvms->debug_end();
 
-    // Keep a copy of the original pointer to NSR objects
-    call->add_req(ophi);
-    // Add the selector so we know which direction the execution took
-    call->add_req(selector);
+   // Keep a copy of the original pointer to NSR objects
+   call->add_req(ophi);
+   // Add the selector so we know which direction the execution took
+   call->add_req(selector);
 
-    for (uint i = 1; i < ophi->req(); i++) {
-      Node* base               = ophi->in(i);
-      JavaObjectNode* ptn      = unique_java_object(base);
+   for (uint i = 1; i < ophi->req(); i++) {
+     Node* base               = ophi->in(i);
+     JavaObjectNode* ptn      = unique_java_object(base);
 
-      // If the base is not scalar replaceable we don't need to register information about
-      // it at this time.
-      if (ptn == NULL || !ptn->scalar_replaceable()) {
-        continue;
-      }
+     // If the base is not scalar replaceable we don't need to register information about
+     // it at this time.
+     if (ptn == NULL || !ptn->scalar_replaceable()) {
+       continue;
+     }
 
-      const TypeOopPtr* base_t   = _igvn->type(base)->make_oopptr();
-      ciInstanceKlass* iklass    = base_t->is_instptr()->instance_klass();
-      int nfields                = iklass->nof_nonstatic_fields();
-      AllocateNode* alloc        = ptn->ideal_node()->as_Allocate();
-      Node* ccpp                 = alloc->result_cast();
-      const TypeOopPtr* res_type = _igvn->type(ccpp)->isa_oopptr();
-      Node* base_klass_node      = alloc->in(AllocateNode::KlassNode);
-      assert(base_klass_node != NULL, "This shouldn't happen.");
+     const TypeOopPtr* base_t   = _igvn->type(base)->make_oopptr();
+     ciInstanceKlass* iklass    = base_t->is_instptr()->instance_klass();
+     int nfields                = iklass->nof_nonstatic_fields();
+     AllocateNode* alloc        = ptn->ideal_node()->as_Allocate();
+     Node* ccpp                 = alloc->result_cast();
+     const TypeOopPtr* res_type = _igvn->type(ccpp)->isa_oopptr();
+     Node* base_klass_node      = alloc->in(AllocateNode::KlassNode);
+     assert(base_klass_node != NULL, "This shouldn't happen.");
 
-      call->add_req(base_klass_node);
+     call->add_req(base_klass_node);
 
-      for (int j = 0; j < nfields; j++) {
-        ciField* field            = iklass->nonstatic_field_at(j);
-        ciType* elem_type         = field->type();
-        BasicType basic_elem_type = field->layout_type();
-        const Type* field_type    = NULL;
-        const TypeOopPtr *field_adr_type = res_type->add_offset(field->offset())->isa_oopptr();
+     for (int j = 0; j < nfields; j++) {
+       ciField* field            = iklass->nonstatic_field_at(j);
+       ciType* elem_type         = field->type();
+       BasicType basic_elem_type = field->layout_type();
+       const Type* field_type    = NULL;
+       const TypeOopPtr *field_adr_type = res_type->add_offset(field->offset())->isa_oopptr();
 
-        if (is_reference_type(basic_elem_type)) {
-          if (!elem_type->is_loaded()) {
-            field_type = TypeInstPtr::BOTTOM;
-          } else {
-            field_type = TypeOopPtr::make_from_klass(elem_type->as_klass());
-          }
+       if (is_reference_type(basic_elem_type)) {
+         if (!elem_type->is_loaded()) {
+           field_type = TypeInstPtr::BOTTOM;
+         } else {
+           field_type = TypeOopPtr::make_from_klass(elem_type->as_klass());
+         }
 
-          if (UseCompressedOops) {
-            field_type = field_type->make_narrowoop();
-            basic_elem_type = T_NARROWOOP;
-          }
-        } else {
-          field_type = Type::get_const_basic_type(basic_elem_type);
-        }
+         if (UseCompressedOops) {
+           field_type = field_type->make_narrowoop();
+           basic_elem_type = T_NARROWOOP;
+         }
+       } else {
+         field_type = Type::get_const_basic_type(basic_elem_type);
+       }
 
-        Node* field_val = PhaseMacroExpand::value_from_mem(_compile, _igvn, memory, ctrl, basic_elem_type, field_type, field_adr_type, alloc);
-        assert(field_val != NULL, "field_val is NULL");
+       Node* field_val = PhaseMacroExpand::value_from_mem(_compile, _igvn, memory, ctrl, basic_elem_type, field_type, field_adr_type, alloc);
+       assert(field_val != NULL, "field_val is NULL");
 
-        call->add_req(field_val);
-      }
+       call->add_req(field_val);
+     }
 
-      JVMState *jvms = call->jvms();
-      jvms->set_endoff(call->req());
-    }
+     JVMState *jvms = call->jvms();
+     jvms->set_endoff(call->req());
+   }
 
-    Node* sobj = _igvn->register_new_node_with_optimizer(new SafePointScalarObjectNode(merge_t, scalar_fields_index, number_of_sr_objects));
-    sobj->init_req(0, _compile->root());
+   Node* sobj = _igvn->register_new_node_with_optimizer(new SafePointScalarObjectNode(merge_t, scalar_fields_index, number_of_sr_objects));
+   sobj->init_req(0, _compile->root());
 
-    // Replaces debug information references to "ophi" in "call" with references to "sobj"
-    call->replace_edges_in_range(ophi, sobj, debug_start, debug_end, _igvn);
-    _igvn->_worklist.push(call);
-  }
+   // Replaces debug information references to "ophi" in "call" with references to "sobj"
+   call->replace_edges_in_range(ophi, sobj, debug_start, debug_end, _igvn);
+   _igvn->_worklist.push(call);
+ }
 
   // Now we can change ophi since we don't need to know the types
   // of the input allocations anymore.
+  Node* new_phi = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), null_ptr));
   for (uint i = 1; i < ophi->req(); i++) {
     Node* base          = ophi->in(i);
     JavaObjectNode* ptn = unique_java_object(base);
 
     if (ptn != NULL && ptn->scalar_replaceable()) {
-      ophi->set_req(i, null_ptr);
+      new_phi->set_req(i, null_ptr);
+    }
+    else {
+      new_phi->set_req(i, ophi->in(i));
     }
   }
 
+  _igvn->replace_node(ophi, new_phi);
+  //_igvn->set_type(ophi, merge_t->meet(TypeOopPtr::NULL_PTR));
   _igvn->hash_insert(ophi);
   _igvn->_worklist.push(ophi);
 }

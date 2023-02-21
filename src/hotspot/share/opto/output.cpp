@@ -727,8 +727,7 @@ PhaseOutput::sv_for_node_id(GrowableArray<ScopeValue*> *objs, int id) {
   return NULL;
 }
 
-void PhaseOutput::set_sv_for_object_node(GrowableArray<ScopeValue*> *objs,
-                                     ScopeValue* sv ) {
+void PhaseOutput::set_sv_for_object_node(GrowableArray<ScopeValue*> *objs, ScopeValue* sv ) {
   assert(!sv->is_object() || (sv_for_node_id(objs, sv->as_ObjectValue()->id()) == NULL), "Precondition");
   assert(!sv->is_object_merge() || (sv_for_node_id(objs, sv->as_ObjectMergeValue()->id()) == NULL), "Precondition");
   objs->append(sv);

@@ -36,8 +36,6 @@ com/sun/net/httpserver/simpleserver
 # Group definitions
 groups=TEST.groups
 
-maxOutputSize=2500000
-
 # Allow querying of various System properties in @requires clauses
 #
 # Source files for classes that will be used at the beginning of each test suite run,

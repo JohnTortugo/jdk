@@ -118,6 +118,16 @@ public abstract class AbstractCompressExpandTest {
     }
 
     @DataProvider
+    Object[][] maskIntProvider() {
+        RandomGenerator rg = RandomGenerator.getDefault();
+
+        return new Object[][]{
+                {supplierWithToString(() -> rg.ints(SIZE).toArray(), "random masks")},
+                {supplierWithToString(this::contiguousMasksInt, "contiguous masks")}
+        };
+    }
+
+    @DataProvider
     Object[][] maskLongProvider() {
         RandomGenerator rg = RandomGenerator.getDefault();
 
@@ -125,6 +135,23 @@ public abstract class AbstractCompressExpandTest {
                 {supplierWithToString(() -> rg.longs(SIZE).toArray(), "random masks")},
                 {supplierWithToString(this::contiguousMasksLong, "contiguous masks")}
         };
+    }
+
+    int[] contiguousMasksInt() {
+        int size = 32 * (32 + 1) / 2 + 1; // 528 + 1
+        int[] masks = new int[size];
+
+        int i = 0;
+        masks[i++] = 0;
+        for (int len = 1; len < 32; len++) {
+            for (int pos = 0; pos <= 32 - len; pos++) {
+                masks[i++] = ((1 << len) - 1) << pos;
+            }
+        }
+        masks[i++] = -1;
+
+        assert i == masks.length;
+        return masks;
     }
 
     long[] contiguousMasksLong() {
@@ -144,7 +171,135 @@ public abstract class AbstractCompressExpandTest {
         return masks;
     }
 
+    @Test(dataProvider = "maskIntProvider")
+    public void testCompressInt(Supplier<int[]> maskProvider) {
+        RandomGenerator rg = RandomGenerator.getDefault();
 
+        int[] values = rg.ints(SIZE).toArray();
+        int[] masks = maskProvider.get();
+
+        for (int i : values) {
+            for (int m : masks) {
+                int actual = actualCompress(i, m);
+                int expected = expectedCompress(i, m);
+                if (actual != expected) {
+                    print(i, m, actual, expected);
+                }
+                Assert.assertEquals(actual, expected);
+            }
+        }
+    }
+
+    @Test(dataProvider = "maskIntProvider")
+    public void testExpandInt(Supplier<int[]> maskProvider) {
+        RandomGenerator rg = RandomGenerator.getDefault();
+
+        int[] values = rg.ints(SIZE).toArray();
+        int[] masks = maskProvider.get();
+
+        for (int i : values) {
+            for (int m : masks) {
+                int actual = actualExpand(i, m);
+                int expected = expectedExpand(i, m);
+                if (actual != expected) {
+                    print(i, m, actual, expected);
+                }
+                Assert.assertEquals(actual, expected);
+            }
+        }
+    }
+
+    @Test(dataProvider = "maskIntProvider")
+    public void testCompressExpandInt(Supplier<int[]> maskProvider) {
+        RandomGenerator rg = RandomGenerator.getDefault();
+
+        int[] values = rg.ints(SIZE).toArray();
+        int[] masks = maskProvider.get();
+
+        for (int i : values) {
+            for (int m : masks) {
+                {
+                    int a = actualCompress(actualExpand(i, m), m);
+                    Assert.assertEquals(a, normalizeCompressedValue(i, m));
+
+                    int b = actualCompress(actualExpand(i, ~m), ~m);
+                    Assert.assertEquals(b, normalizeCompressedValue(i, ~m));
+                }
+
+                {
+                    int a = actualExpand(actualCompress(i, m), m);
+                    // Clear unset mask bits
+                    Assert.assertEquals(a, i & m);
+
+                    int b = actualExpand(actualCompress(i, ~m), ~m);
+                    Assert.assertEquals(a & b, 0);
+                    Assert.assertEquals(a | b, i);
+                }
+            }
+        }
+    }
+
+    @Test
+    public void testContiguousMasksInt() {
+        RandomGenerator rg = RandomGenerator.getDefault();
+
+        int[] values = rg.ints(SIZE).toArray();
+
+        for (int i : values) {
+            assertContiguousMask(i, 0, 0L);
+            for (int len = 1; len < 32; len++) {
+                for (int pos = 0; pos <= 32 - len; pos++) {
+                    int mask = ((1 << len) - 1) << pos;
+
+                    assertContiguousMask(i, pos, mask);
+                }
+            }
+            assertContiguousMask(i, 0, -1L);
+        }
+    }
+
+    void assertContiguousMask(int i, int pos, int mask) {
+        Assert.assertEquals(actualCompress(i, mask), (i & mask) >>> pos);
+        Assert.assertEquals(actualExpand(i, mask), (i << pos) & mask);
+    }
+
+    @Test(dataProvider = "maskLongProvider")
+    public void testCompressLong(Supplier<long[]> maskProvider) {
+        RandomGenerator rg = RandomGenerator.getDefault();
+
+        long[] values = rg.longs(SIZE).toArray();
+        long[] masks = maskProvider.get();
+
+        for (long i : values) {
+            for (long m : masks) {
+                long actual = actualCompress(i, m);
+                long expected = expectedCompress(i, m);
+                if (actual != expected) {
+                    print(i, m, actual, expected);
+                }
+                Assert.assertEquals(actual, expected);
+            }
+        }
+    }
+
+    @Test(dataProvider = "maskLongProvider")
+    public void testExpandLong(Supplier<long[]> maskProvider) {
+        RandomGenerator rg = RandomGenerator.getDefault();
+
+        long[] values = rg.longs(SIZE).toArray();
+        long[] masks = maskProvider.get();
+
+        for (long i : values) {
+            for (long m : masks) {
+                long actual = actualExpand(i, m);
+                long expected = expectedExpand(i, m);
+                if (actual != expected) {
+                    print(i, m, actual, expected);
+                }
+                Assert.assertEquals(actual, expected);
+            }
+        }
+    }
 
     @Test(dataProvider = "maskLongProvider")
     public void testCompressExpandLong(Supplier<long[]> maskProvider) {
@@ -155,26 +310,71 @@ public abstract class AbstractCompressExpandTest {
 
         for (long i : values) {
             for (long m : masks) {
-                long a = actualCompress(actualExpand(i, m), m);
-                Assert.assertEquals(a, normalizeCompressedValue(i, m));
+                {
+                    long a = actualCompress(actualExpand(i, m), m);
+                    Assert.assertEquals(a, normalizeCompressedValue(i, m));
 
-                long b = actualCompress(actualExpand(i, ~m), ~m);
-                Assert.assertEquals(b, normalizeCompressedValue(i, ~m));
+                    long b = actualCompress(actualExpand(i, ~m), ~m);
+                    Assert.assertEquals(b, normalizeCompressedValue(i, ~m));
+                }
 
-                a = actualExpand(actualCompress(i, m), m);
-                b = actualExpand(actualCompress(i, ~m), ~m);
-                Assert.assertEquals(a & b, 0);
-                Assert.assertEquals(a | b, i);
+                {
+                    long a = actualExpand(actualCompress(i, m), m);
+                    // Clear unset mask bits
+                    Assert.assertEquals(a, i & m);
+
+                    long b = actualExpand(actualCompress(i, ~m), ~m);
+                    Assert.assertEquals(a & b, 0);
+                    Assert.assertEquals(a | b, i);
+                }
             }
         }
     }
 
-    static long normalizeCompressedValue(long i, long mask) {
-        int mbc = Long.bitCount(mask);
-        if (mbc != 64) {
-            return i & ((1L << mbc) - 1);
+    @Test
+    public void testContiguousMasksLong() {
+        RandomGenerator rg = RandomGenerator.getDefault();
+
+        long[] values = rg.longs(SIZE).toArray();
+
+        for (long i : values) {
+            assertContiguousMask(i, 0, 0L);
+            for (int len = 1; len < 64; len++) {
+                for (int pos = 0; pos <= 64 - len; pos++) {
+                    long mask = ((1L << len) - 1) << pos;
+
+                    assertContiguousMask(i, pos, mask);
+                }
+            }
+            assertContiguousMask(i, 0, -1L);
+        }
+    }
+
+    void assertContiguousMask(long i, int pos, long mask) {
+        Assert.assertEquals(actualCompress(i, mask), (i & mask) >>> pos);
+        Assert.assertEquals(actualExpand(i, mask), (i << pos) & mask);
+    }
+
+    static int normalizeCompressedValue(int i, int mask) {
+        int mbc = Integer.bitCount(mask);
+        if (mbc != 32) {
+            return i & ((1 << mbc) - 1);
         } else {
             return i;
         }
+    }
+
+    static void print(int i, int m, int actual, int expected) {
+        System.out.println(String.format("i = %s", Integer.toBinaryString(i)));
+        System.out.println(String.format("m = %s", Integer.toBinaryString(m)));
+        System.out.println(String.format("a = %s", Integer.toBinaryString(actual)));
+        System.out.println(String.format("e = %s", Integer.toBinaryString(expected)));
+    }
+
+    static void print(long i, long m, long actual, long expected) {
+        System.out.println(String.format("i = %s", Long.toBinaryString(i)));
+        System.out.println(String.format("m = %s", Long.toBinaryString(m)));
+        System.out.println(String.format("a = %s", Long.toBinaryString(actual)));
+        System.out.println(String.format("e = %s", Long.toBinaryString(expected)));
     }
 }

@@ -5402,8 +5402,6 @@ bool PhaseIdealLoop::verify_dominance(Node* n, Node* use, Node* LCA, Node* early
     Node* d = LCA;
     while (d != early) {
       if (d == C->root()) {
-        Compile::current()->root()->dump(-100000);
-        //dump_bad_graph("Bad graph detected in compute_lca_of_uses", n, early, LCA);
         tty->print_cr("*** Use %d isn't dominated by def %d ***", use->_idx, n->_idx);
         had_error = true;
         break;
@@ -5439,9 +5437,6 @@ Node* PhaseIdealLoop::compute_lca_of_uses(Node* n, Node* early, bool verify) {
       LCA = dom_lca_for_get_late_ctrl( LCA, use, n );
       if (verify) had_error = verify_dominance(n, use, LCA, early) || had_error;
     }
-  }
-  if (had_error) {
-    Compile::current()->root()->dump(-100000);
   }
   assert(!had_error, "bad dominance");
   return LCA;
@@ -5876,8 +5871,7 @@ void PhaseIdealLoop::build_loop_late_post_work(Node *n, bool pinned) {
 #ifdef ASSERT
     if (legal->is_Start() && !early->is_Root()) {
       // Bad graph. Print idom path and fail.
-      //dump_bad_graph("Bad graph detected in build_loop_late", n, early, LCA);
-      Compile::current()->root()->dump(-100000);
+      dump_bad_graph("Bad graph detected in build_loop_late", n, early, LCA);
       assert(false, "Bad graph detected in build_loop_late");
     }
 #endif

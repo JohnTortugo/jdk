@@ -2280,6 +2280,12 @@ void Compile::Optimize() {
   // safepoints
   remove_root_to_sfpts_edges(igvn);
 
+
+  bool ss = strcmp("testSliceMulti", method()->name()->as_utf8()) == 0;
+  if (ss) {
+    tty->print_cr("Found");
+  }
+
   // Perform escape analysis
   if (do_escape_analysis() && ConnectionGraph::has_candidates(this)) {
     if (has_loops()) {

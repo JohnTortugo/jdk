@@ -23,7 +23,8 @@
 # Langtools-specific test groups
 
 langtools_javac = \
-    tools/javac/T7008643/InlinedFinallyConfuseDebuggersTest.java
+    tools/all \
+    tools/javac
 
 langtools_javap = \
     tools/all \

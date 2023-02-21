@@ -66,6 +66,7 @@ oop DebugInfoReadStream::read_oop() {
   return o;
 }
 
+#ifdef ASSERT
 static void printit(GrowableArray<ScopeValue*>* _obj_pool, int type, int id) {
   tty->print_cr("Object pool with %d entries. ID %d was already present. New type is %d.", _obj_pool->length(), id, type);
   for (int i = 0; i < _obj_pool->length(); i++) {
@@ -95,6 +96,7 @@ static void printit(GrowableArray<ScopeValue*>* _obj_pool, int type, int id) {
   }
   tty->print_cr("---------");
 }
+#endif
 
 ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {
   int id = read_int();
