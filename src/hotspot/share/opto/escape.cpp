@@ -667,7 +667,8 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
 
   // Now we can change ophi since we don't need to know the types
   // of the input allocations anymore.
-  Node* new_phi = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), null_ptr));
+  const Type* new_t = merge_t->meet(TypePtr::NULL_PTR);
+  Node* new_phi = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), null_ptr, new_t));
   for (uint i = 1; i < ophi->req(); i++) {
     Node* base          = ophi->in(i);
     JavaObjectNode* ptn = unique_java_object(base);
@@ -681,7 +682,6 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
   }
 
   _igvn->replace_node(ophi, new_phi);
-  //_igvn->set_type(ophi, merge_t->meet(TypeOopPtr::NULL_PTR));
   _igvn->hash_insert(ophi);
   _igvn->_worklist.push(ophi);
 }
