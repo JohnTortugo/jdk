@@ -97,7 +97,6 @@ private:
 
   bool eliminate_boxing_node(CallStaticJavaNode *boxing);
   bool eliminate_allocate_node(AllocateNode *alloc);
-  bool can_eliminate_allocation(AllocateNode *alloc, GrowableArray <SafePointNode *>& safepoints);
   bool scalar_replacement(AllocateNode *alloc, GrowableArray <SafePointNode *>& safepoints_done);
   void process_users_of_allocation(CallNode *alloc);
 
@@ -203,8 +202,9 @@ public:
   void eliminate_macro_nodes();
   bool expand_macro_nodes();
 
-  static Node *value_from_mem(Compile* comp, PhaseIterGVN* igvn, Node *mem, Node *ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc);
-  static Node *value_from_mem_phi(Compile* comp, PhaseIterGVN* igvn, Node *mem, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level);
+  static bool can_eliminate_allocation(PhaseIterGVN *igvn, AllocateNode *alloc, GrowableArray <SafePointNode *>* safepoints);
+  static Node *value_from_mem(Compile *comp, PhaseIterGVN *igvn, Node *mem, Node *ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc);
+  static Node *value_from_mem_phi(Compile *comp, PhaseIterGVN *igvn, Node *mem, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level);
 
   PhaseIterGVN &igvn() const { return _igvn; }
 

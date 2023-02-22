@@ -460,17 +460,23 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
   bool found_sr_allocate = false;
 
   for (uint i = 1; i < phi->req(); i++) {
-    JavaObjectNode* ptn = unique_java_object(phi->in(i));
-
-    // We are looking for at least one SR object in the merge
-    if (ptn != NULL && ptn->scalar_replaceable()) {
-      found_sr_allocate = true;
-    }
-
     // Right now we can't restore a "null" pointer during deoptimization
     if (_igvn->type(phi->in(i))->maybe_null()) {
       NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d. Input %d is nullable.", phi->_idx, i);)
       return false;
+    }
+
+    // We are looking for at least one SR object in the merge
+    JavaObjectNode* ptn = unique_java_object(phi->in(i));
+    if (ptn != NULL && ptn->scalar_replaceable()) {
+      assert(ptn->ideal_node() != NULL && ptn->ideal_node()->is_Allocate(), "sanity");
+      Node* alloc = ptn->ideal_node()->as_Allocate();
+
+      if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc->as_Allocate(), NULL)) {
+        found_sr_allocate = true;
+      } else {
+        ptn->set_scalar_replaceable(false);
+      }
     }
   }
 
@@ -514,7 +520,7 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
 
   PhiNode* phi = var->ideal_node()->as_Phi();
   const Type* phi_t = _igvn->type(phi);
-  if (phi_t == NULL || phi_t->isa_instptr() == NULL) {
+  if (phi_t == NULL || phi_t->isa_instptr() == NULL || !phi_t->is_instptr()->klass_is_exact()) {
     return false;
   }
 

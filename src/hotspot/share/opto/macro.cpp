@@ -550,7 +550,7 @@ Node *PhaseMacroExpand::value_from_mem(Compile* comp, PhaseIterGVN* igvn, Node *
 }
 
 // Check the possibility of scalar replacement.
-bool PhaseMacroExpand::can_eliminate_allocation(AllocateNode *alloc, GrowableArray <SafePointNode *>& safepoints) {
+bool PhaseMacroExpand::can_eliminate_allocation(PhaseIterGVN* igvn, AllocateNode *alloc, GrowableArray <SafePointNode *>* safepoints) {
   //  Scan the uses of the allocation to check for anything that would
   //  prevent us from eliminating it.
   NOT_PRODUCT( const char* fail_eliminate = NULL; )
@@ -565,7 +565,7 @@ bool PhaseMacroExpand::can_eliminate_allocation(AllocateNode *alloc, GrowableArr
     NOT_PRODUCT(fail_eliminate = "Allocation does not have unique CheckCastPP";)
     can_eliminate = false;
   } else {
-    res_type = _igvn.type(res)->isa_oopptr();
+    res_type = igvn->type(res)->isa_oopptr();
     if (res_type == NULL) {
       NOT_PRODUCT(fail_eliminate = "Neither instance or array allocation";)
       can_eliminate = false;
@@ -585,7 +585,7 @@ bool PhaseMacroExpand::can_eliminate_allocation(AllocateNode *alloc, GrowableArr
       Node* use = res->fast_out(j);
 
       if (use->is_AddP()) {
-        const TypePtr* addp_type = _igvn.type(use)->is_ptr();
+        const TypePtr* addp_type = igvn->type(use)->is_ptr();
         int offset = addp_type->offset();
 
         if (offset == Type::OffsetTop || offset == Type::OffsetBot) {
@@ -626,8 +626,8 @@ bool PhaseMacroExpand::can_eliminate_allocation(AllocateNode *alloc, GrowableArr
           DEBUG_ONLY(disq_node = use;)
           NOT_PRODUCT(fail_eliminate = "NULL or TOP memory";)
           can_eliminate = false;
-        } else {
-          safepoints.append_if_missing(sfpt);
+        } else if (safepoints != NULL) {
+          safepoints->append_if_missing(sfpt);
         }
       } else if (use->Opcode() != Op_CastP2X) { // CastP2X is used by card mark
         if (use->is_Phi()) {
@@ -651,7 +651,7 @@ bool PhaseMacroExpand::can_eliminate_allocation(AllocateNode *alloc, GrowableArr
   }
 
 #ifndef PRODUCT
-  if (PrintEliminateAllocations) {
+  if (PrintEliminateAllocations && safepoints != NULL) {
     if (can_eliminate) {
       tty->print("Scalar ");
       if (res == NULL)
@@ -1030,7 +1030,7 @@ bool PhaseMacroExpand::eliminate_allocate_node(AllocateNode *alloc) {
   alloc->extract_projections(&_callprojs, false /*separate_io_proj*/, false /*do_asserts*/);
 
   GrowableArray <SafePointNode *> safepoints;
-  if (!can_eliminate_allocation(alloc, safepoints)) {
+  if (!can_eliminate_allocation(&_igvn, alloc, &safepoints)) {
     return false;
   }
 
