@@ -202,7 +202,7 @@ public:
   void eliminate_macro_nodes();
   bool expand_macro_nodes();
 
-  static bool can_eliminate_allocation(PhaseIterGVN *igvn, AllocateNode *alloc, GrowableArray <SafePointNode *>* safepoints);
+  static bool can_eliminate_allocation(PhaseIterGVN *igvn, AllocateNode *alloc, GrowableArray <SafePointNode *>* safepoints, bool ignore_merges = false);
   static Node *value_from_mem(Compile *comp, PhaseIterGVN *igvn, Node *mem, Node *ctl, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc);
   static Node *value_from_mem_phi(Compile *comp, PhaseIterGVN *igvn, Node *mem, BasicType ft, const Type *ftype, const TypeOopPtr *adr_t, AllocateNode *alloc, Node_Stack *value_phis, int level);
 

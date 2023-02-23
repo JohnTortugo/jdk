@@ -472,7 +472,7 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
       assert(ptn->ideal_node() != NULL && ptn->ideal_node()->is_Allocate(), "sanity");
       Node* alloc = ptn->ideal_node()->as_Allocate();
 
-      if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc->as_Allocate(), NULL)) {
+      if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc->as_Allocate(), NULL, true)) {
         found_sr_allocate = true;
       } else {
         ptn->set_scalar_replaceable(false);
