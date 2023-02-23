@@ -793,13 +793,14 @@ void PhaseOutput::FillLocArray( int idx, MachSafePointNode* sfpt, Node *local,
 
         uint number_of_sr_objects = spobj->number_of_objects();
         uint field_index = selector_idx+1;
+        const uint CANDIDATE_OBJ_BASE_IDX = 100000;
         for (uint i = 0; i < number_of_sr_objects; i++) {
           Node* klass_node = sfpt->in(field_index++);
           const Type *t = klass_node->bottom_type();
           assert(t->is_instklassptr(), "Not supported allocation.");
           ciInstanceKlass* cik = t->isa_instklassptr()->instance_klass();
 
-          ObjectValue* sv_o = new ObjectValue(10000 + spobj->_idx + i,
+          ObjectValue* sv_o = new ObjectValue(CANDIDATE_OBJ_BASE_IDX + spobj->_idx + i,
                               new ConstantOopWriteValue(cik->java_mirror()->constant_encoding()));
           set_sv_for_object_node(sv->possible_objects(), sv_o);
 

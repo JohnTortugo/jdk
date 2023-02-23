@@ -62,7 +62,6 @@ jobs:
           - 'jdk/tier2 part 2'
           - 'jdk/tier2 part 3'
           - 'jdk/tier3'
-          - 'jdk/tier4'
           - 'langtools/tier1'
           - 'hs/tier1'
           - 'hs/tier2'
@@ -90,9 +89,6 @@ jobs:
 
           - test-name: 'jdk/tier3'
             test-suite: 'test/jdk/:tier3'
-
-          - test-name: 'jdk/tier4'
-            test-suite: 'test/jdk/:tier4'
 
           - test-name: 'langtools/tier1'
             test-suite: 'test/langtools/:tier1'

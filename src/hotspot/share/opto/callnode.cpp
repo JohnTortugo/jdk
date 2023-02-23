@@ -1468,33 +1468,25 @@ SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
                                                      Node* alloc,
 #endif
                                                      uint first_index,
-                                                     uint n_fields) :
+                                                     uint n_fields,
+                                                     int merge_pointer_idx,
+                                                     uint number_of_objects) :
   TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
   _first_index(first_index),
   _n_fields(n_fields),
 #ifdef ASSERT
   _alloc(alloc),
 #endif
-  _merge_pointer_idx(-1),
-  _number_of_objects(1)
+  _merge_pointer_idx(merge_pointer_idx),
+  _number_of_objects(number_of_objects)
 {
 #ifdef ASSERT
-  if (!alloc->is_Allocate()
-      && !(alloc->Opcode() == Op_VectorBox)) {
+  if (merge_pointer_idx < 0 && /* not a merge */
+      !alloc->is_Allocate() && !(alloc->Opcode() == Op_VectorBox)) {
     alloc->dump();
     assert(false, "unexpected call node");
   }
 #endif
-  init_class_id(Class_SafePointScalarObject);
-}
-
-SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp, int merge_pointer_idx, uint number_of_objects) :
-  TypeNode(tp, 1), // 1 control input -- seems required.  Get from root.
-  _first_index(0),
-  _n_fields(0),
-  _merge_pointer_idx(merge_pointer_idx),
-  _number_of_objects(number_of_objects)
-{
   init_class_id(Class_SafePointScalarObject);
 }
 

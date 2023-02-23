@@ -663,8 +663,18 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
      jvms->set_endoff(call->req());
    }
 
-   Node* sobj = _igvn->register_new_node_with_optimizer(new SafePointScalarObjectNode(merge_t, scalar_fields_index, number_of_sr_objects));
+   SafePointScalarObjectNode* sobj = new SafePointScalarObjectNode(merge_t,
+#ifdef ASSERT
+   NOT_PRODUCT(NULL),
+#endif
+                                                                   /* first_index */ 0,
+                                                                   /* n_fields */ 0,
+                                                                   scalar_fields_index,
+                                                                   number_of_sr_objects);
+   assert(sobj->is_from_merge(), "sanity");
+
    sobj->init_req(0, _compile->root());
+   _igvn->register_new_node_with_optimizer(sobj);
 
    // Replaces debug information references to "ophi" in "call" with references to "sobj"
    call->replace_edges_in_range(ophi, sobj, debug_start, debug_end, _igvn);

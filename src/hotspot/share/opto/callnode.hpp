@@ -525,9 +525,10 @@ public:
 #ifdef ASSERT
                             Node* alloc,
 #endif
-                            uint first_index, uint n_fields);
-
-  SafePointScalarObjectNode(const TypeOopPtr* tp, int merge_pointer_idx, uint number_of_objects);
+                            uint first_index,
+                            uint n_fields,
+                            int merge_pointer_idx = -1,
+                            uint number_of_objects = 1);
 
   virtual int Opcode() const;
   virtual uint           ideal_reg() const;
