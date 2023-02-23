@@ -1718,24 +1718,6 @@ Node* find_node(Node* n, const int idx) {
   return n->find(idx);
 }
 
-void save_graph(const char* path) {
-  Unique_Node_List ideal_nodes; // Used by CG construction and types splitting.
-  ideal_nodes.push(Compile::current()->root());
-
-  fileStream fs(path);
-
-  for( uint next = 0; next < ideal_nodes.size(); ++next ) {
-    Node* n = ideal_nodes.at(next);
-
-    n->dump(NULL, false, &fs); fs.cr();
-
-    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
-      Node* m = n->fast_out(i);   // Get user
-      ideal_nodes.push(m);
-    }
-  }
-}
-
 // Call this from debugger, search in new nodes:
 Node* find_node(const int idx) {
   return Compile::current()->root()->find(idx);

@@ -1051,24 +1051,36 @@ void PhaseIterGVN::verify_step(Node* n) {
 }
 
 void PhaseIterGVN::trace_PhaseIterGVN(Node* n, Node* nn, const Type* oldtype) {
-  bool ss = strcmp("testSliceMulti", C->method()->name()->as_utf8()) == 0;
-  if (ss || TraceIterativeGVN) {
+  if (TraceIterativeGVN) {
     uint wlsize = _worklist.size();
     const Type* newtype = type_or_null(n);
-
-    if (n != NULL) {
-      tty->print("OLD: "); n->dump(); tty->cr();
+    if (nn != n) {
+      // print old node
+      tty->print("< ");
+      if (oldtype != newtype && oldtype != NULL) {
+        oldtype->dump();
+      }
+      do { tty->print("\t"); } while (tty->position() < 16);
+      tty->print("<");
+      n->dump();
     }
-    if (oldtype != NULL) {
-        tty->print("OLD-TYPE:" ); oldtype->dump(); tty->cr();
+    if (oldtype != newtype || nn != n) {
+      // print new node and/or new type
+      if (oldtype == NULL) {
+        tty->print("* ");
+      } else if (nn != n) {
+        tty->print("> ");
+      } else {
+        tty->print("= ");
+      }
+      if (newtype == NULL) {
+        tty->print("null");
+      } else {
+        newtype->dump();
+      }
+      do { tty->print("\t"); } while (tty->position() < 16);
+      nn->dump();
     }
-    if (nn != NULL) {
-      tty->print("NEW: " ); nn->dump(); tty->cr();
-    }
-    if (newtype != NULL) {
-        tty->print("NEW-TYPE: "); newtype->dump(); tty->cr();
-    }
-
     if (Verbose && wlsize < _worklist.size()) {
       tty->print("  Push {");
       while (wlsize != _worklist.size()) {
@@ -1081,8 +1093,6 @@ void PhaseIterGVN::trace_PhaseIterGVN(Node* n, Node* nn, const Type* oldtype) {
       // ignore n, it might be subsumed
       verify_step((Node*) NULL);
     }
-
-    tty->print_cr("-------------");
   }
 }
 
@@ -1173,7 +1183,6 @@ void PhaseIterGVN::optimize() {
     shuffle_worklist();
   }
 
-  bool ss = strcmp("testSliceMulti", C->method()->name()->as_utf8()) == 0;
   uint loop_count = 0;
   // Pull from worklist and transform the node. If the node has changed,
   // update edge info and put uses on worklist.
