@@ -55,55 +55,11 @@ jobs:
       fail-fast: false
       matrix:
         test-name:
-          - 'jdk/tier1 part 1'
-          - 'jdk/tier1 part 2'
-          - 'jdk/tier1 part 3'
-          - 'jdk/tier2 part 1'
-          - 'jdk/tier2 part 2'
           - 'jdk/tier2 part 3'
-          - 'jdk/tier3'
-          - 'langtools/tier1'
-          - 'hs/tier1'
-          - 'hs/tier2'
-          - 'hs/tier3'
-          - 'hs/tier4'
 
         include:
-          - test-name: 'jdk/tier1 part 1'
-            test-suite: 'test/jdk/:tier1_part1'
-
-          - test-name: 'jdk/tier1 part 2'
-            test-suite: 'test/jdk/:tier1_part2'
-
-          - test-name: 'jdk/tier1 part 3'
-            test-suite: 'test/jdk/:tier1_part3'
-
-          - test-name: 'jdk/tier2 part 1'
-            test-suite: 'test/jdk/:tier2_part1'
-
-          - test-name: 'jdk/tier2 part 2'
-            test-suite: 'test/jdk/:tier2_part2'
-
           - test-name: 'jdk/tier2 part 3'
             test-suite: 'test/jdk/:tier2_part3'
-
-          - test-name: 'jdk/tier3'
-            test-suite: 'test/jdk/:tier3'
-
-          - test-name: 'langtools/tier1'
-            test-suite: 'test/langtools/:tier1'
-
-          - test-name: 'hs/tier1'
-            test-suite: 'test/hotspot/jtreg/:tier1'
-
-          - test-name: 'hs/tier2'
-            test-suite: 'test/hotspot/jtreg/:tier2'
-
-          - test-name: 'hs/tier3'
-            test-suite: 'test/hotspot/jtreg/:tier3'
-
-          - test-name: 'hs/tier4'
-            test-suite: 'test/hotspot/jtreg/:tier4'
 
 
     steps:
