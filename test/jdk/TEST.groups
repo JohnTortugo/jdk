@@ -67,7 +67,7 @@ tier2_part2 = \
     :jdk_time
 
 tier2_part3 = \
-    :jdk_net
+    com/sun/net/httpserver/simpleserver/StressDirListings.java
 
 tier3 = \
     :build \
