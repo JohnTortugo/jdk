@@ -41,7 +41,7 @@ on:
       debug-levels:
         required: false
         type: string
-        default: '[ "debug" ]'
+        default: '[ "debug", "release" ]'
       gcc-major-version:
         required: true
         type: string
@@ -77,7 +77,7 @@ jobs:
         include:
           - debug-level: debug
             flags: --with-debug-level=fastdebug
-            suffix:
+            suffix: -debug
 
     steps:
       - name: 'Checkout the JDK source'

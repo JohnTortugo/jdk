@@ -60,7 +60,7 @@ jobs:
         include:
           - test-name: 'jdk/tier2 part 3'
             test-suite: 'test/jdk/:tier2_part3'
-
+            debug-suffix: -debug
 
     steps:
       - name: 'Checkout the JDK source'
