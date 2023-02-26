@@ -129,21 +129,23 @@ static void dump_graph(Node* root) {
   for (uint next = 0; next < ideal_nodes.size(); ++next ) {
     Node* n = ideal_nodes.at(next);
 
-    tty->print("%d %d ", n->_idx, n->Opcode());
+    n->dump();
 
-    for (uint i=0; i<n->req(); i++) {
-      if (n->in(i) != NULL) {
-        tty->print(" %d ", n->in(i)->_idx);
-      }
-    }
+//    tty->print("%d %d ", n->_idx, n->Opcode());
+//
+//    for (uint i=0; i<n->req(); i++) {
+//      if (n->in(i) != NULL) {
+//        tty->print(" %d ", n->in(i)->_idx);
+//      }
+//    }
 
-    tty->print("[[");
+    //tty->print("[[");
     for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
       Node* m = n->fast_out(i);   // Get user
-      tty->print(" %d ", m->_idx);
+      //tty->print(" %d ", m->_idx);
       ideal_nodes.push(m);
     }
-    tty->print_cr("]]");
+    //tty->print_cr("]]");
   }
 }
 
