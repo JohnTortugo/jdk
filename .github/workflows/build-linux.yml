@@ -77,7 +77,7 @@ jobs:
         include:
           - debug-level: debug
             flags: --with-debug-level=fastdebug
-            suffix: -debug
+            suffix:
 
     steps:
       - name: 'Checkout the JDK source'
