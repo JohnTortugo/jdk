@@ -129,7 +129,9 @@ static void dump_graph(Node* root) {
   for (uint next = 0; next < ideal_nodes.size(); ++next ) {
     Node* n = ideal_nodes.at(next);
 
+#ifndef PRODUCT
     n->dump();
+#endif
 
 //    tty->print("%d %d ", n->_idx, n->Opcode());
 //
