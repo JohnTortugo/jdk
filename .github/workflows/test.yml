@@ -64,16 +64,16 @@ jobs:
         include:
           - test-name: 't1'
             test-suite: 'test/jdk/:tier2_part3'
-            
+
           - test-name: 't2'
             test-suite: 'test/jdk/:tier2_part3'
-            
+
           - test-name: 't3'
             test-suite: 'test/jdk/:tier2_part3'
-            
+
           - test-name: 't4'
             test-suite: 'test/jdk/:tier2_part3'
-            
+
           - test-name: 't5'
             test-suite: 'test/jdk/:tier2_part3'
 
@@ -132,7 +132,7 @@ jobs:
           JDK_IMAGE_DIR=${{ steps.bundles.outputs.jdk-path }}
           SYMBOLS_IMAGE_DIR=${{ steps.bundles.outputs.symbols-path }}
           TEST_IMAGE_DIR=${{ steps.bundles.outputs.tests-path }}
-          JTREG='JAVA_OPTIONS=-XX:+PrintInlining;VERBOSE=fail,error,time;KEYWORDS=!headful'
+          JTREG='JAVA_OPTIONS=-XX:+UnlockDiagnosticVMOptions -XX:+PrintInlining;VERBOSE=fail,error,time;KEYWORDS=!headful'
           && bash ./.github/scripts/gen-test-summary.sh "$GITHUB_STEP_SUMMARY" "$GITHUB_OUTPUT"
         env:
           PATH: ${{ steps.path.outputs.value }}
