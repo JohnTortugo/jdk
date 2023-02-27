@@ -55,12 +55,27 @@ jobs:
       fail-fast: false
       matrix:
         test-name:
-          - 'jdk/tier2 part 3'
+          - 't1'
+          - 't2'
+          - 't3'
+          - 't4'
+          - 't5'
 
         include:
-          - test-name: 'jdk/tier2 part 3'
+          - test-name: 't1'
             test-suite: 'test/jdk/:tier2_part3'
-            debug-suffix: -debug
+            
+          - test-name: 't2'
+            test-suite: 'test/jdk/:tier2_part3'
+            
+          - test-name: 't3'
+            test-suite: 'test/jdk/:tier2_part3'
+            
+          - test-name: 't4'
+            test-suite: 'test/jdk/:tier2_part3'
+            
+          - test-name: 't5'
+            test-suite: 'test/jdk/:tier2_part3'
 
     steps:
       - name: 'Checkout the JDK source'
