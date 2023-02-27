@@ -129,25 +129,21 @@ static void dump_graph(Node* root) {
   for (uint next = 0; next < ideal_nodes.size(); ++next ) {
     Node* n = ideal_nodes.at(next);
 
-#ifndef PRODUCT
-    n->dump();
-#endif
+    tty->print("%d %d ", n->_idx, n->Opcode());
 
-//    tty->print("%d %d ", n->_idx, n->Opcode());
-//
-//    for (uint i=0; i<n->req(); i++) {
-//      if (n->in(i) != NULL) {
-//        tty->print(" %d ", n->in(i)->_idx);
-//      }
-//    }
+    for (uint i=0; i<n->req(); i++) {
+      if (n->in(i) != NULL) {
+        tty->print(" %d ", n->in(i)->_idx);
+      }
+    }
 
-    //tty->print("[[");
+    tty->print("[[");
     for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
       Node* m = n->fast_out(i);   // Get user
-      //tty->print(" %d ", m->_idx);
+      tty->print(" %d ", m->_idx);
       ideal_nodes.push(m);
     }
-    //tty->print_cr("]]");
+    tty->print_cr("]]");
   }
 }
 
@@ -414,7 +410,7 @@ bool ConnectionGraph::compute_escape() {
   }
 
   // 6. Remove reducible allocation merges from ideal graph
-  if (ReduceAllocationMerges) {
+  if (ReduceAllocationMerges && reducible_merges.size() > 0) {
     if (strcmp(_compile->method()->name()->as_utf8(), "doPrivileged") == 0 ||
         strcmp(_compile->method()->name()->as_utf8(), "getParameter") == 0
     ) {
@@ -679,7 +675,14 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
 
      call->add_req(base_klass_node);
 
-     tty->print_cr("\tName of Allocate.Klass -> %s", iklass->name()->as_utf8());
+     tty->print_cr("\tName of Allocate[%d].Klass -> %s. Opcode %d", i, iklass->name()->as_utf8(), alloc->Opcode());
+     Node_Notes* nn = _compile->node_notes_at(alloc->_idx);
+     JVMState* state = alloc->jvms();
+     ciMethod* m = jvms->method();
+             m->print_short_name(tty);
+      int lineno = m->line_number_from_bci(state->bci());
+      tty->print_cr(" @ bci:%d (line %d)", state->bci(), lineno);
+
 
      for (int j = 0; j < nfields; j++) {
        ciField* field            = iklass->nonstatic_field_at(j);
