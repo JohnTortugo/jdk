@@ -420,6 +420,10 @@ bool ConnectionGraph::compute_escape() {
     ) {
       tty->print_cr("BEFORE Reducing merges on method %s:", _compile->method()->name()->as_utf8());
       dump_graph(_compile->root());
+      tty->print_cr("---------");
+      tty->print_cr("%d reducible Phis.", reducible_merges.size());
+      for (uint i = 0; i < reducible_merges.size(); i++ ) tty->print("*%d*", reducible_merges.at(i)->_idx);
+      tty->print_cr("---------");
     }
 
     bool delay = _igvn->delay_transform();
@@ -674,6 +678,8 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
      assert(base_klass_node != NULL, "This shouldn't happen.");
 
      call->add_req(base_klass_node);
+
+     tty->print_cr("\tName of Allocate.Klass -> %s", iklass->name()->as_utf8());
 
      for (int j = 0; j < nfields; j++) {
        ciField* field            = iklass->nonstatic_field_at(j);
