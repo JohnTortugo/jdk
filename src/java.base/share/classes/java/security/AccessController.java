@@ -776,6 +776,7 @@ public final class AccessController {
 
         assert isPrivileged(); // sanity check invariant
         T result = action.run();
+        ensureMaterializedForStackWalk(result);
         assert isPrivileged(); // sanity check invariant
 
         // Keep these alive across the run() call so they can be
