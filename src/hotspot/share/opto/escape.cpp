@@ -418,7 +418,12 @@ bool ConnectionGraph::compute_escape() {
       dump_graph(_compile->root());
       tty->print_cr("---------");
       tty->print_cr("%d reducible Phis.", reducible_merges.size());
-      for (uint i = 0; i < reducible_merges.size(); i++ ) tty->print("*%d*", reducible_merges.at(i)->_idx);
+      for (uint i = 0; i < reducible_merges.size(); i++ ) {
+        PointsToNode* ptn = ptnode_adr(reducible_merges.at(i)->_idx);
+        tty->print("*%d* es=%d sr=%d", reducible_merges.at(i)->_idx,
+                                  ptn != NULL ? ptn->escape_state() : -1,
+                                  ptn != NULL ? ptn->scalar_replaceable() : -1);
+      }
       tty->print_cr("---------");
     }
 
@@ -681,7 +686,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
      ciMethod* m = jvms->method();
              m->print_short_name(tty);
       int lineno = m->line_number_from_bci(state->bci());
-      tty->print_cr(" @ bci:%d (line %d)", state->bci(), lineno);
+      tty->print_cr(" @ bci:%d (line %d) es=%d sr=%d", state->bci(), lineno, ptn->escape_state(), ptn->scalar_replaceable());
 
 
      for (int j = 0; j < nfields; j++) {
