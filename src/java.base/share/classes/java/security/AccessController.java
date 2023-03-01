@@ -780,9 +780,9 @@ public final class AccessController {
 
         // The 'getStackAccessControlContext' call inside 'isPrivileged'
         // requires that no Local was scalar replaced. However, in some
-        // situations C2 may simplify the return of this method and make
-        // 'result' a NonEscaping object and therefore available for scalar
-        // replacement. The call below enforces 'result' to always escape.
+        // situations, after inlining, 'result' (or part of a possibly
+        // allocation merge Phi leading to it) might become NonEscaping and get
+        // scalar replaced. The call below enforces 'result' to always escape.
         ensureMaterializedForStackWalk(result);
 
         // Keep these alive across the run() call so they can be
