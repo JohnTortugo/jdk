@@ -1477,7 +1477,7 @@ void Deoptimization::reassign_fields(frame* fr, RegisterMap* reg_map, GrowableAr
         continue;
       }
     } else {
-      // Merge objects should have been processed during object reallocation
+      // Merge objects don't need field reassignment
       continue;
     }
 

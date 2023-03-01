@@ -776,8 +776,14 @@ public final class AccessController {
 
         assert isPrivileged(); // sanity check invariant
         T result = action.run();
-        ensureMaterializedForStackWalk(result);
         assert isPrivileged(); // sanity check invariant
+
+        // The 'getStackAccessControlContext' call inside 'isPrivileged'
+        // requires that no Local was scalar replaced. However, in some
+        // situations C2 may simplify the return of this method and make
+        // 'result' a NonEscaping object and therefore available for scalar
+        // replacement. The call below enforces 'result' to always escape.
+        ensureMaterializedForStackWalk(result);
 
         // Keep these alive across the run() call so they can be
         // retrieved by getStackAccessControlContext().

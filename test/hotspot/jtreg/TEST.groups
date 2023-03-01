@@ -22,7 +22,7 @@
 #
 
 hotspot_all = \
-  /
+  compiler/c2/irTests/scalarReplacement/AllocationMergesTests.java
 
 hotspot_all_no_apps = \
   / \

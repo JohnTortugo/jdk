@@ -133,8 +133,12 @@ class ObjectValue: public ScopeValue {
   GrowableArray<ScopeValue*> _field_values;
   Handle                     _value;
   bool                       _visited;
-  bool                       _merge_candidate;
-  bool                       _skip_field_assignment;
+  bool                       _merge_candidate;        // Will be true if this object is just representing
+                                                      // a scalar replaced object inside an ObjectMergeValue.
+
+  bool                       _skip_field_assignment;  // Will be true if the _value field of this object
+                                                      // actually holds a pointer to a non-scalarized object
+                                                      // that was participating in an allocation merge.
  public:
   ObjectValue(int id, ScopeValue* klass)
      : _id(id)
@@ -183,8 +187,14 @@ class ObjectValue: public ScopeValue {
   void print_fields_on(outputStream* st) const;
 };
 
-// An ObjectMergeValue describes objects that were inputs to a Phi in C2
-// and at least one of them was scalar replaced.
+// An ObjectMergeValue describes objects that were inputs to a Phi in C2 and at
+// least one of them were scalar replaced.
+// '_selector' is an integer value that will be '-1' if during the execution of
+// the C2 compiled code the path taken was that of the Phi input that was NOT
+// scalar replaced. In that case '_merge_pointer' is a pointer to an already
+// allocated object. If '_selector' is not '-1' then it should be the index
+// of a candidate object in '_possible_objects'. That candidate object is an
+// ObjectValue describing an object that was scalar replaced.
 
 class ObjectMergeValue: public ScopeValue {
 protected:
@@ -231,7 +241,7 @@ public:
 
   // Printing
   void print_on(outputStream* st) const;
-  void print_fields_on(outputStream* st) const;
+  void print_candidates_on(outputStream* st) const;
 };
 
 class AutoBoxObjectValue : public ObjectValue {

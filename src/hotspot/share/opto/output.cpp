@@ -805,7 +805,7 @@ void PhaseOutput::FillLocArray( int idx, MachSafePointNode* sfpt, Node *local,
           set_sv_for_object_node(sv->possible_objects(), sv_o);
 
           uint nfields = cik->nof_nonstatic_fields();
-          for (uint i = 0; i < nfields; i++) {
+          for (uint j = 0; j < nfields; j++) {
             Node* fld_node = sfpt->in(field_index++);
             (void)FillLocArray(sv_o->field_values()->length(), sfpt, fld_node, sv_o->field_values(), sv->possible_objects());
           }

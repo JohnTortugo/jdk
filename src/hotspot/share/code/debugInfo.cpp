@@ -66,51 +66,13 @@ oop DebugInfoReadStream::read_oop() {
   return o;
 }
 
-#ifdef ASSERT
-static void printit(GrowableArray<ScopeValue*>* _obj_pool, int type, int id) {
-  tty->print_cr("Object pool with %d entries. ID %d was already present. New type is %d.", _obj_pool->length(), id, type);
-  for (int i = 0; i < _obj_pool->length(); i++) {
-    if (_obj_pool->at(i)->is_object()) {
-      ObjectValue* obj = _obj_pool->at(i)->as_ObjectValue();
-      tty->print_cr("\t Type: Object");
-      tty->print_cr("\t Address: %p", obj);
-      tty->print_cr("\t ID: %d", obj->id());
-      tty->print_cr("\t Merge Candidate: %d", obj->is_merge_candidate());
-    }
-    else if (_obj_pool->at(i)->is_object_merge()) {
-      ObjectMergeValue* mobj = _obj_pool->at(i)->as_ObjectMergeValue();
-      tty->print_cr("\t Type: Merge");
-      tty->print_cr("\t Address: %p", mobj);
-      tty->print_cr("\t ID: %d", mobj->id());
-
-      GrowableArray<ScopeValue*>* cands = mobj->possible_objects();
-      for (int j = 0; j < cands->length(); j++) {
-        ObjectValue* cand = cands->at(j)->as_ObjectValue();
-        tty->print_cr("\t\t Type: Candidate");
-        tty->print_cr("\t\t Address: %p", cand);
-        tty->print_cr("\t\t ID: %d", cand->id());
-        tty->print_cr("\t\t Merge Candidate: %d", cand->is_merge_candidate());
-        tty->print_cr("\t\t Skip Field: %d", cand->skip_field_assignment());
-      }
-    }
-  }
-  tty->print_cr("---------");
-}
-#endif
-
 ScopeValue* DebugInfoReadStream::read_object_value(bool is_auto_box) {
   int id = read_int();
 #ifdef ASSERT
   assert(_obj_pool != nullptr, "object pool does not exist");
   for (int i = _obj_pool->length() - 1; i >= 0; i--) {
-    if (_obj_pool->at(i)->is_object() && _obj_pool->at(i)->as_ObjectValue()->id() == id) {
-      printit(_obj_pool, 0, id);
-    }
-    if (_obj_pool->at(i)->is_object_merge() && _obj_pool->at(i)->as_ObjectMergeValue()->id() == id) {
-      printit(_obj_pool, 1, id);
-    }
-    //assert(!_obj_pool->at(i)->is_object() || _obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
-    //assert(!_obj_pool->at(i)->is_object_merge() || _obj_pool->at(i)->as_ObjectMergeValue()->id() != id, "should not be read twice");
+    assert(!_obj_pool->at(i)->is_object() || _obj_pool->at(i)->as_ObjectValue()->id() != id, "should not be read twice");
+    assert(!_obj_pool->at(i)->is_object_merge() || _obj_pool->at(i)->as_ObjectMergeValue()->id() != id, "should not be read twice");
   }
 #endif
   ObjectValue* result = is_auto_box ? new AutoBoxObjectValue(id) : new ObjectValue(id);
@@ -235,7 +197,13 @@ void ObjectValue::write_on(DebugInfoWriteStream* stream) {
 }
 
 void ObjectValue::print_on(outputStream* st) const {
-  st->print("%s[%d]", is_auto_box() ? "box_obj" : "obj", _id);
+  st->print("%s: ID=%d, is_merge_candidate=%d, skip_field_assignment=%d, N.Fields=%d",
+            is_auto_box() ? "box_obj" : "obj", _id,
+            _merge_candidate, _skip_field_assignment, _field_values.length());
+  st->print_cr(", klass: %s ", java_lang_Class::as_Klass(_klass->as_ConstantOopReadValue()->value()())->external_name());
+  st->print("Fields: ");
+  print_fields_on(st);
+  st->cr();
 }
 
 void ObjectValue::print_fields_on(outputStream* st) const {
@@ -253,12 +221,19 @@ void ObjectValue::print_fields_on(outputStream* st) const {
 
 // ObjectMergeValue
 ObjectValue* ObjectMergeValue::select(frame* fr, RegisterMap* reg_map) {
+  assert(fr != NULL && reg_map != NULL, "sanity");
+
+  // If we call select again on the same merge we should return the same result
+  if (_selected != NULL) {
+    return _selected;
+  }
+
   StackValue* sv_selector = StackValue::create_stack_value(fr, reg_map, _selector);
   jint selector = sv_selector->get_int();
 
   // If the selector is '-1' it means that execution followed the path
   // where no scalar replacement happened.
-  // Otherwise, it is the index of _possible_objects array that holds
+  // Otherwise, it is the index in _possible_objects array that holds
   // the description of the scalar replaced object.
   if (selector == -1) {
     StackValue* sv_merge_pointer = StackValue::create_stack_value(fr, reg_map, _merge_pointer);
@@ -273,6 +248,7 @@ ObjectValue* ObjectMergeValue::select(frame* fr, RegisterMap* reg_map) {
 
     return _selected;
   } else {
+    assert(selector < _possible_objects.length(), "sanity");
     _selected = (ObjectValue*) _possible_objects.at(selector);
 
     // Exchange the id of the selected object and the merge object.
@@ -298,8 +274,8 @@ void ObjectMergeValue::set_value(oop value) {
 void ObjectMergeValue::read_object(DebugInfoReadStream* stream) {
   _selector = read_from(stream);
   _merge_pointer = read_from(stream);
-  int length = stream->read_int();
-  for (int i = 0; i < length; i++) {
+  int ncandidates = stream->read_int();
+  for (int i = 0; i < ncandidates; i++) {
     ScopeValue* result = read_from(stream);
     assert(result->is_object(), "Candidate is not an object!");
     ObjectValue* obj = result->as_ObjectValue();
@@ -318,18 +294,23 @@ void ObjectMergeValue::write_on(DebugInfoWriteStream* stream) {
     stream->write_int(_id);
     _selector->write_on(stream);
     _merge_pointer->write_on(stream);
-    int length = _possible_objects.length();
-    stream->write_int(length);
-    for (int i = 0; i < length; i++) {
+    int ncandidates = _possible_objects.length();
+    stream->write_int(ncandidates);
+    for (int i = 0; i < ncandidates; i++) {
       _possible_objects.at(i)->as_ObjectValue()->write_on(stream);
     }
   }
 }
 
 void ObjectMergeValue::print_on(outputStream* st) const {
+  st->print("merge: ID=%d, N.Candidates=%d", _id, _possible_objects.length());
 }
 
-void ObjectMergeValue::print_fields_on(outputStream* st) const {
+void ObjectMergeValue::print_candidates_on(outputStream* st) const {
+  int ncandidates = _possible_objects.length();
+  for (int i = 0; i < ncandidates; i++) {
+    _possible_objects.at(i)->as_ObjectValue()->print_on(st);
+  }
 }
 
 // ConstantIntValue

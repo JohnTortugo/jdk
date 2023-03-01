@@ -121,32 +121,6 @@ void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn) {
   }
 }
 
-static void dump_graph(Node* root) {
-  Unique_Node_List ideal_nodes;
-
-  ideal_nodes.push(root);
-
-  for (uint next = 0; next < ideal_nodes.size(); ++next ) {
-    Node* n = ideal_nodes.at(next);
-
-    tty->print("%d %d ", n->_idx, n->Opcode());
-
-    for (uint i=0; i<n->req(); i++) {
-      if (n->in(i) != NULL) {
-        tty->print(" %d ", n->in(i)->_idx);
-      }
-    }
-
-    tty->print("[[");
-    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
-      Node* m = n->fast_out(i);   // Get user
-      tty->print(" %d ", m->_idx);
-      ideal_nodes.push(m);
-    }
-    tty->print_cr("]]");
-  }
-}
-
 bool ConnectionGraph::compute_escape() {
   Compile* C = _compile;
   PhaseGVN* igvn = _igvn;
@@ -411,22 +385,6 @@ bool ConnectionGraph::compute_escape() {
 
   // 6. Remove reducible allocation merges from ideal graph
   if (ReduceAllocationMerges && reducible_merges.size() > 0) {
-    if (strcmp(_compile->method()->name()->as_utf8(), "doPrivileged") == 0 ||
-        strcmp(_compile->method()->name()->as_utf8(), "getParameter") == 0
-    ) {
-      tty->print_cr("BEFORE Reducing merges on method %s:", _compile->method()->name()->as_utf8());
-      dump_graph(_compile->root());
-      tty->print_cr("---------");
-      tty->print_cr("%d reducible Phis.", reducible_merges.size());
-      for (uint i = 0; i < reducible_merges.size(); i++ ) {
-        PointsToNode* ptn = ptnode_adr(reducible_merges.at(i)->_idx);
-        tty->print("*%d* es=%d sr=%d", reducible_merges.at(i)->_idx,
-                                  ptn != NULL ? ptn->escape_state() : -1,
-                                  ptn != NULL ? ptn->scalar_replaceable() : -1);
-      }
-      tty->print_cr("---------");
-    }
-
     bool delay = _igvn->delay_transform();
     _igvn->set_delay_transform(true);
     for (uint i = 0; i < reducible_merges.size(); i++ ) {
@@ -434,13 +392,6 @@ bool ConnectionGraph::compute_escape() {
       reduce_this_phi(ptnode_adr(n->_idx)->as_LocalVar());
     }
     _igvn->set_delay_transform(delay);
-
-    if (strcmp(_compile->method()->name()->as_utf8(), "doPrivileged") == 0 ||
-        strcmp(_compile->method()->name()->as_utf8(), "getParameter") == 0
-    ) {
-      tty->print_cr("AFTER Reducing merges on method %s:", _compile->method()->name()->as_utf8());
-      dump_graph(_compile->root());
-    }
   }
 
   // Annotate at safepoints if they have <= ArgEscape objects in their scope and at
@@ -679,15 +630,6 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
      assert(base_klass_node != NULL, "This shouldn't happen.");
 
      call->add_req(base_klass_node);
-
-     tty->print_cr("\tName of Allocate[%d].Klass -> %s. Opcode %d", i, iklass->name()->as_utf8(), alloc->Opcode());
-     Node_Notes* nn = _compile->node_notes_at(alloc->_idx);
-     JVMState* state = alloc->jvms();
-     ciMethod* m = jvms->method();
-             m->print_short_name(tty);
-      int lineno = m->line_number_from_bci(state->bci());
-      tty->print_cr(" @ bci:%d (line %d) es=%d sr=%d", state->bci(), lineno, ptn->escape_state(), ptn->scalar_replaceable());
-
 
      for (int j = 0; j < nfields; j++) {
        ciField* field            = iklass->nonstatic_field_at(j);
