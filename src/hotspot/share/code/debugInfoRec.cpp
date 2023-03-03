@@ -364,7 +364,7 @@ void DebugInformationRecorder::dump_object_pool(GrowableArray<ScopeValue*>* obje
           obj->possible_objects()->at(j)->as_ObjectValue()->set_visited(false);
         }
       } else {
-        assert(false, "unknown type.");
+        assert(false, "Unknown object type in object pool.");
       }
     }
   }

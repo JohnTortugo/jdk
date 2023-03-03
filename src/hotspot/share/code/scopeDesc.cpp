@@ -114,10 +114,6 @@ GrowableArray<ScopeValue*>* ScopeDesc::decode_object_values(int decode_offset) {
     // object's fields could reference it (OBJECT_ID_CODE).
     (void)ScopeValue::read_from(stream);
   }
-  // The assert below was disabled because the handling of scalar replaced
-  // objects participating in merges may add multiple "candidate" objects to the
-  // result array and therefore result->length() may be different of length.
-  // assert(result->length() == length, "inconsistent debug information");
   return result;
 }
 
@@ -246,7 +242,7 @@ void ScopeDesc::print_on(outputStream* st, PcDesc* pd) const {
       } else if (sv->is_object_merge()) {
         sv->as_ObjectMergeValue()->print_on(st);
       } else {
-        st->print_cr("Unknown Object Type");
+        st->print_cr("Unknown Object Type in Object Pool");
       }
     }
   }

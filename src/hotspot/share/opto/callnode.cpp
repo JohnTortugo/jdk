@@ -1481,7 +1481,7 @@ SafePointScalarObjectNode::SafePointScalarObjectNode(const TypeOopPtr* tp,
   _number_of_objects(number_of_objects)
 {
 #ifdef ASSERT
-  if (merge_pointer_idx < 0 && /* not a merge */
+  if (merge_pointer_idx < 0 && // not a merge
       !alloc->is_Allocate() && !(alloc->Opcode() == Op_VectorBox)) {
     alloc->dump();
     assert(false, "unexpected call node");

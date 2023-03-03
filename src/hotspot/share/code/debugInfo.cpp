@@ -220,6 +220,12 @@ void ObjectValue::print_fields_on(outputStream* st) const {
 
 
 // ObjectMergeValue
+
+// Returns the ObjectValue that should be used for the local that this
+// ObjectMergeValue represents. ObjectMergeValue represents allocation
+// merges in C2. This method will select which path the allocation merge
+// took during execution of the Trap that triggered the rematerialization
+// of the object.
 ObjectValue* ObjectMergeValue::select(frame* fr, RegisterMap* reg_map) {
   assert(fr != NULL && reg_map != NULL, "sanity");
 

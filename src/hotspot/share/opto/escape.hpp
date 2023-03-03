@@ -590,17 +590,9 @@ private:
   // -------------------------------------------
   // Methods related to Reduce Allocation Merges
 
-  // Returns true if there is a Store node dominated by
-  // 'merge_phi_region' for which the associated AddP uses
-  // 'base' as Base.
-  bool is_read_only(Node* merge_phi_region, Node* base) const;
-
   bool can_reduce_this_phi(PointsToNode* var) const;
   bool can_reduce_this_phi_users(PhiNode* phi) const;
   bool can_reduce_this_phi_inputs(PhiNode* phi) const;
-
-  Node* find_memory_phi(Node* region, const TypeOopPtr* base_t, ciField* field);
-  Node* create_selector(PhiNode* ophi);
 
   void reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_Node_List* safepoints);
   void reduce_this_phi(LocalVarNode* var);

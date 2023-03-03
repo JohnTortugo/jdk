@@ -416,45 +416,9 @@ bool ConnectionGraph::compute_escape() {
   return has_non_escaping_obj;
 }
 
-bool ConnectionGraph::is_read_only(Node* merge_phi_region, Node* base) const {
-  Unique_Node_List worklist;
-  worklist.push(base);
-
-  for (uint next = 0; next < worklist.size(); ++next) {
-    Node* n = worklist.at(next);
-
-    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
-      Node* m = n->fast_out(i);
-
-      switch (m->Opcode()) {
-        case Op_CastPP:
-        case Op_CheckCastPP:
-        case Op_EncodeP:
-        case Op_EncodePKlass:
-        case Op_DecodeN:
-        case Op_DecodeNKlass:
-          worklist.push(m);
-          break;
-      }
-
-      if (m->is_AddP()) {
-        for (DUIterator_Fast imax, i = m->fast_outs(imax); i < imax; i++) {
-          Node* child = m->fast_out(i);
-
-          if (child->is_Store()) {
-            assert(child->in(0) != NULL || m->in(0) != NULL, "No control for store or AddP.");
-            if (_igvn->is_dominator(merge_phi_region, child->in(0) != NULL ? child->in(0) : m->in(0))) {
-              return false;
-            }
-          }
-        }
-      }
-    }
-  }
-
-  return true;
-}
-
+// Check if it's profitable to reduce the Phi passed as parameter.  Returns true
+// if at least one scalar replaceable allocation participates in the merge and
+// no input to the Phi is nullable.
 bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
   // Check if there is an scalar replaceable allocate in the Phi
   bool found_sr_allocate = false;
@@ -480,23 +444,12 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
     }
   }
 
-  if (!found_sr_allocate) {
-    NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d. No SR Allocate as input.", phi->_idx);)
-    return false;
-  }
-
-  // Check if there is no write to the input after it is merged.
-  // If there is a write to any input after the merge we need to bail out.
-  for (uint in_idx = 1; in_idx < phi->req(); in_idx++) {
-    if (!is_read_only(phi->in(0), phi->in(in_idx))) {
-      NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d. The %dth input has a store after the merge.", phi->_idx, in_idx);)
-      return false;
-    }
-  }
-
-  return true;
+  NOT_PRODUCT(if (TraceReduceAllocationMerges && !found_sr_allocate) tty->print_cr("Can NOT reduce Phi %d. No SR Allocate as input.", phi->_idx);)
+  return found_sr_allocate;
 }
 
+// Check if we are able to untangle the merge. Right now we only reduce Phis
+// which are only used as debug information.
 bool ConnectionGraph::can_reduce_this_phi_users(PhiNode* phi) const {
   for (DUIterator_Fast imax, i = phi->fast_outs(imax); i < imax; i++) {
     Node* use = phi->fast_out(i);
@@ -515,6 +468,10 @@ bool ConnectionGraph::can_reduce_this_phi_users(PhiNode* phi) const {
   return true;
 }
 
+// Returns true if: 1) It's profitable to reduce the merge, and 2) It The Phi is
+// only used in some certain code shapes. Check comments in
+// 'can_reduce_this_phi_inputs' and 'can_reduce_this_phi_users' for more
+// details.
 bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
   assert(var->escape_state() == PointsToNode::NoEscape, "Phi should be NoEscape");
 
@@ -532,39 +489,13 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
   return true;
 }
 
-Node* ConnectionGraph::create_selector(PhiNode* ophi) {
-  Node* con = _igvn->register_new_node_with_optimizer(ConINode::make(-1));
-  Node* selector = PhiNode::make(ophi->region(), con);
-  for (uint i=1; i<ophi->req(); i++) {
-    con = _igvn->register_new_node_with_optimizer(ConINode::make(i));
-    selector->set_req(i, con);
-  }
-  return _igvn->register_new_node_with_optimizer(selector);
-}
-
-Node* ConnectionGraph::find_memory_phi(Node* region, const TypeOopPtr* base_t, ciField* field) {
-  int offset              = field->offset();
-  const TypeOopPtr *tinst = base_t->add_offset(offset)->isa_oopptr();
-  const int alias_idx     = _compile->get_alias_index(tinst);
-  Node* bot_memory        = NULL;
-
-  for (DUIterator_Fast imax, i = region->fast_outs(imax); i < imax; i++) {
-    Node* n = region->fast_out(i);
-    if (n->is_Phi() && n->bottom_type() == Type::MEMORY) {
-      int idx = _compile->get_alias_index(n->adr_type());
-      if (idx == alias_idx) {
-        return n;
-      }
-      if (idx == Compile::AliasIdxBot) {
-        assert(bot_memory == NULL, "Two Phi#Bot");
-        bot_memory = n;
-      }
-    }
-  }
-
-  return bot_memory;
-}
-
+// This method will create SafePointScalarObjectNode for each combination of
+// scalar replaceable allocation in 'var' and SafePoint node in 'safepoints'.
+// Each SafePointScalarObjectNodes created here may describe multiple scalar
+// replaced objects - check detailed description in SafePointScalarObjectNode
+// class header.
+//
+// This method will set to 'NULL' entries in the Phi that are scalar replaceable.
 void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_Node_List* safepoints) {
   assert(var->ideal_node()->is_Phi(), "Not a Phi!");
   PhiNode* ophi             = var->ideal_node()->as_Phi();
@@ -585,10 +516,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
    Node* base          = ophi->in(i);
    JavaObjectNode* ptn = unique_java_object(base);
 
-   if (ptn == NULL || !ptn->scalar_replaceable()) {
-     selector->set_req(i, minus_one);
-   }
-   else {
+   if (ptn != NULL && ptn->scalar_replaceable()) {
      Node* sr_obj_idx = _igvn->register_new_node_with_optimizer(ConINode::make(number_of_sr_objects));
      selector->set_req(i, sr_obj_idx);
      number_of_sr_objects++;

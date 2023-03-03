@@ -610,12 +610,12 @@ public:
   bool is_from_merge() const { return _merge_pointer_idx >= 0; }
 
   int merge_pointer_idx(JVMState* jvms) const {
-    assert(jvms != NULL, "missed JVMS");
+    assert(jvms != NULL, "JVMS reference is NULL.");
     return jvms->scloff() + _merge_pointer_idx;
   }
 
   int selector_idx(JVMState* jvms) const {
-    assert(jvms != NULL, "missed JVMS");
+    assert(jvms != NULL, "JVMS reference is NULL.");
     return jvms->scloff() + _merge_pointer_idx + 1;
   }
 
