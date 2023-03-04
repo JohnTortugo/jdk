@@ -291,11 +291,12 @@ bool ConnectionGraph::compute_escape() {
     if (n->is_Allocate()) {
       n->as_Allocate()->_is_non_escaping = noescape;
     }
-    if (noescape && ptn->scalar_replaceable()) {
+    bool was_sr = (noescape && ptn->scalar_replaceable());
+    if (SplitUniqueTypes || was_sr) {
       adjust_scalar_replaceable_state(ptn);
       if (ptn->scalar_replaceable()) {
         jobj_worklist.push(ptn);
-      } else {
+      } else if (was_sr) {
         found_nsr_alloc = true;
       }
     }
@@ -306,10 +307,19 @@ bool ConnectionGraph::compute_escape() {
     find_scalar_replaceable_allocs(jobj_worklist);
   }
 
-  for (int next = 0; next < jobj_worklist.length(); ++next) {
-    JavaObjectNode* jobj = jobj_worklist.at(next);
-    if (jobj->scalar_replaceable()) {
-      alloc_worklist.append(jobj->ideal_node());
+  if (SplitUniqueTypes) {
+    for (int next = 0; next < java_objects_worklist.length(); ++next) {
+      JavaObjectNode* jobj = java_objects_worklist.at(next);
+      if (jobj->unique()) {
+        alloc_worklist.append(jobj->ideal_node());
+      }
+    }
+  } else {
+    for (int next = 0; next < jobj_worklist.length(); ++next) {
+      JavaObjectNode* jobj = jobj_worklist.at(next);
+      if (jobj->scalar_replaceable()) {
+        alloc_worklist.append(jobj->ideal_node());
+      }
     }
   }
 
@@ -348,14 +358,14 @@ bool ConnectionGraph::compute_escape() {
     for (int next = 0; next < alloc_length; ++next) {
       Node* n = alloc_worklist.at(next);
       PointsToNode* ptn = ptnode_adr(n->_idx);
-      assert(ptn->escape_state() == PointsToNode::NoEscape && ptn->scalar_replaceable(), "sanity");
+      assert((ptn->escape_state() == PointsToNode::NoEscape && ptn->scalar_replaceable() && !SplitUniqueTypes) || (SplitUniqueTypes && ptn->unique()), "sanity");
     }
   }
 #endif
 
   // 5. Separate memory graph for scalar replaceable allcations.
   bool has_scalar_replaceable_candidates = (alloc_worklist.length() > 0);
-  if (has_scalar_replaceable_candidates && EliminateAllocations) {
+  if (SplitUniqueTypes || (has_scalar_replaceable_candidates && EliminateAllocations)) {
     assert(C->do_aliasing(), "Aliasing should be enabled");
     // Now use the escape information to create unique types for
     // scalar replaceable objects.
@@ -1880,10 +1890,11 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj) {
       }
       for (BaseIterator i(field); i.has_next(); i.next()) {
         PointsToNode* base = i.get();
-        // 2. An object is not scalar replaceable if the field into which it is
+        // 2. An object is not scalar replaceable nor unique if the field into which it is
         // stored has multiple bases one of which is null.
         if ((base == null_obj) && (field->base_count() > 1)) {
           set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "is stored into field with potentially null base"));
+          jobj->set_unique(false);
           return;
         }
         // 2.5. An object is not scalar replaceable if the field into which it is
@@ -1895,16 +1906,18 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj) {
       }
     }
     assert(use->is_Field() || use->is_LocalVar(), "sanity");
-    // 3. An object is not scalar replaceable if it is merged with other objects.
+    // 3. An object is not scalar replaceable nor unique if it is merged with other objects.
     for (EdgeIterator j(use); j.has_next(); j.next()) {
       PointsToNode* ptn = j.get();
       if (ptn->is_JavaObject() && ptn != jobj) {
         // Mark all objects.
         set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA trace_merged_message(ptn)));
         set_not_scalar_replaceable(ptn NOT_PRODUCT(COMMA trace_merged_message(jobj)));
+        jobj->set_unique(false);
+        ptn->set_unique(false);
       }
     }
-    if (!jobj->scalar_replaceable()) {
+    if (!jobj->scalar_replaceable() || !jobj->unique()) {
       return;
     }
   }
@@ -1974,6 +1987,8 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj) {
           // Mark all bases.
           set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "may point to more than one object"));
           set_not_scalar_replaceable(base NOT_PRODUCT(COMMA "may point to more than one object"));
+          jobj->set_unique(false);
+          base->set_unique(false);
         }
       }
     }
@@ -3208,7 +3223,8 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
       PointsToNode::EscapeState es = ptn->escape_state();
       // We have an allocation or call which returns a Java object,
       // see if it is non-escaped.
-      if (es != PointsToNode::NoEscape || !ptn->scalar_replaceable()) {
+      bool is_sr = es == PointsToNode::NoEscape && ptn->scalar_replaceable();
+      if ((SplitUniqueTypes && !ptn->unique()) || (!SplitUniqueTypes && !is_sr)) {
         continue;
       }
       // Find CheckCastPP for the allocate or for the return value of a call

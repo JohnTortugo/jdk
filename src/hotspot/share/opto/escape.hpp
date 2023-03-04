@@ -164,7 +164,8 @@ public:
     ScalarReplaceable = 1,  // Not escaped object could be replaced with scalar
     PointsToUnknown   = 2,  // Has edge to phantom_object
     ArraycopySrc      = 4,  // Has edge from Arraycopy node
-    ArraycopyDst      = 8   // Has edge to Arraycopy node
+    ArraycopyDst      = 8,  // Has edge to Arraycopy node
+    Unique            = 16  // Has an unique instance type
   } NodeFlags;
 
 
@@ -205,6 +206,15 @@ public:
       _flags |= ScalarReplaceable;
     } else {
       _flags &= ~ScalarReplaceable;
+    }
+  }
+
+  bool     unique() const { return (_flags & Unique) != 0;}
+  void set_unique(bool v) {
+    if (v) {
+      _flags |= Unique;
+    } else {
+      _flags &= ~Unique;
     }
   }
 
@@ -652,7 +662,7 @@ inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, 
   _edges(CG->_compile->comp_arena(), 2, 0, NULL),
   _uses (CG->_compile->comp_arena(), 2, 0, NULL),
   _type((u1)type),
-  _flags(ScalarReplaceable),
+  _flags(ScalarReplaceable | Unique),
   _escape((u1)es),
   _fields_escape((u1)es),
   _node(n),
