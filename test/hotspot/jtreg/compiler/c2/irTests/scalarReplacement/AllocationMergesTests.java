@@ -397,9 +397,104 @@ public class AllocationMergesTests {
     }
 
     @Test
+    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH })
+    @IR(counts = { IRNode.ALLOC, "2" })
+    int testMergedWithDeadCode(boolean cond, int x) {
+        ADefaults obj1 = new ADefaults(x);
+        ADefaults obj2 = new ADefaults();
+        ADefaults obj = cond ? obj1 : obj2;
+
+        return obj1.i + obj.ble + 1082;
+    }
+
+
+    // ------------------ Some Scalar Replacement Should Happen in The Tests Below ------------------- //
+
+    @Test
+    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
+    @IR(failOn = { IRNode.ALLOC })
+    // all allocations will be dead
+    int testPartialPhis(boolean cond, int l, int x, int y) {
+        int k = l;
+
+        if (l == 0) {
+            k = l + 1;
+        } else if (l == 2) {
+            k = l + 2;
+        } else if (l == 3) {
+            new Point(x, y);
+        } else if (l == 4) {
+            new Point(y, x);
+        }
+
+        return k;
+    }
+
+    @Test
+    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be removed. After initialization they are read-only objects.
+    // Access to the input of the merge, after the merge, is fine.
+    int testPollutedNoWrite(boolean cond, int l) {
+        Shape obj1 = new Square(l);
+        Shape obj2 = new Square(l);
+        Shape obj = null;
+        int res = 0;
+
+        if (cond) {
+            obj = obj1;
+        } else {
+            obj = obj2;
+        }
+
+        for (int i=1; i<132; i++) {
+            res += obj.x;
+        }
+
+        return res + obj1.x + obj2.y;
+    }
+
+    @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "4" })
-    // Won't be reduced because of the field access
+    @IR(failOn = { IRNode.ALLOC })
+    // Initial p3 will always be dead.
+    // The other two allocations will be reduced and scaled
+    int testThreeWayAliasedAlloc(boolean cond, int x, int y) {
+        Point p1 = new Point(x, y);
+        Point p2 = new Point(x+1, y+1);
+        Point p3 = new Point(x+2, y+2);
+
+        if (cond) {
+            p3 = p1;
+        } else {
+            p3 = p2;
+        }
+
+        return p3.x + p3.y;
+    }
+
+    @Test
+    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be eliminated.
+    int TestTrapAfterMerge(boolean cond, int x, int y) {
+        Point p = new Point(x, x);
+
+        if (cond) {
+            p = new Point(y, y);
+        }
+
+        for (int i=402; i<432; i+=x) {
+            x++;
+        }
+
+        return p.x + x;
+    }
+
+    @Test
+    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
+    @IR(counts = { IRNode.ALLOC, "2" })
+    // The allocation of "Picture" will be removed and only allocations of "Position" will be kept
     Point testNestedObjectsObject(boolean cond, int x, int y) {
         Picture p = new Picture(x, x, y);
 
@@ -412,7 +507,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "4" })
+    @IR(failOn = { IRNode.ALLOC })
+    // All four allocations will be removed since only the scalar 'x' is needed
     int testNestedObjectsNoEscapeObject(boolean cond, int x, int y) {
         Picture p = new Picture(x, x, y);
 
@@ -425,8 +521,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "6" })
-    // 2 arrays inside each of the two PicturePositions. Each array have 2 other objects.
+    @IR(counts = { IRNode.ALLOC, "4" })
+    // The two PicturePositions objects will be reduced and scaled.
     Point[] testNestedObjectsArray(boolean cond, int x, int y) {
         PicturePositions p = new PicturePositions(x, y, x+y);
 
@@ -439,8 +535,9 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
-    // The allocation inside the last if will be removed
+    @IR(failOn = { IRNode.ALLOC })
+    // The allocation inside the last if will be removed because it's not part of a merge
+    // The other two allocations will be reduced and removed
     int testTrappingAfterMerge(boolean cond, int x, int y) {
         Point p = new Point(x, y);
         int res = 0;
@@ -463,6 +560,7 @@ public class AllocationMergesTests {
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
     @IR(counts = { IRNode.ALLOC, "2" })
+    // Both merges will be reduced and removed
     int testSimpleAliasedAlloc(boolean cond, int x, int y) {
         Point p1 = new Point(x, y);
         Point p2 = new Point(y, x);
@@ -477,7 +575,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "4" })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both merges will be reduced and removed
     int testSimpleDoubleMerge(boolean cond, int x, int y) {
         Point p1 = new Point(x, y);
         Point p2 = new Point(x+1, y+1);
@@ -492,7 +591,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "4" })
+    @IR(failOn = { IRNode.ALLOC })
+    // All allocations will be removed.
     int testConsecutiveSimpleMerge(boolean cond1, boolean cond2, int x, int y) {
         Point p0 = new Point(x, x);
         Point p1 = new Point(x, y);
@@ -519,7 +619,9 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "4" })
+    @IR(failOn = { IRNode.ALLOC })
+    // The initial allocation is always dead. The other
+    // two will be reduced and scaled.
     int testDoubleIfElseMerge(boolean cond, int x, int y) {
         Point p1 = new Point(x, y);
         Point p2 = new Point(x+1, y+1);
@@ -537,7 +639,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be reduced and scaled.
     int testNoEscapeWithLoadInLoop(boolean cond, int x, int y) {
         Point p = new Point(x, y);
         int res = 0;
@@ -555,7 +658,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be reduced and scaled
     int testCmpAfterMerge(boolean cond, boolean cond2, int x, int y) {
         Point a = new Point(x, y);
         Point b = new Point(y, x);
@@ -572,7 +676,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be eliminated.
     int testCondAfterMergeWithAllocate(boolean cond1, boolean cond2, int x, int y) {
         Point p = new Point(x, y);
 
@@ -589,7 +694,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be eliminated.
     int testCondLoadAfterMerge(boolean cond1, boolean cond2, int x, int y) {
         Point p = new Point(x, y);
 
@@ -611,7 +717,9 @@ public class AllocationMergesTests {
     }
 
     @Test
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
+    // The initial allocation is always dead. The other
+    // two will be reduced and scaled.
     int testIfElseInLoop() {
         int res = 0;
 
@@ -632,7 +740,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be reduced and removed.
     int testLoadInCondAfterMerge(boolean cond, int x, int y) {
         Point p = new Point(x, y);
 
@@ -659,7 +768,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
+    // Both allocations will be reduced and removed.
     int testLoadInLoop(boolean cond, int x, int y) {
         Point obj1 = new Point(x, y);
         Point obj2 = new Point(y, x);
@@ -681,7 +791,8 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "3" })
+    @IR(counts = { IRNode.ALLOC, "1" })
+    // p2 escapes and will remain. The other two allocations will be reduced and scaled.
     int testMergesAndMixedEscape(boolean cond, int x, int y) {
         Point p1 = new Point(x, y);
         Point p2 = new Point(x, y);
@@ -693,94 +804,6 @@ public class AllocationMergesTests {
         }
 
         return val + p1.x + p2.y;
-    }
-
-    @Test
-    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "0" })
-    // all allocations will be dead
-    int testPartialPhis(boolean cond, int l, int x, int y) {
-        int k = l;
-
-        if (l == 0) {
-            k = l + 1;
-        } else if (l == 2) {
-            k = l + 2;
-        } else if (l == 3) {
-            new Point(x, y);
-        } else if (l == 4) {
-            new Point(y, x);
-        }
-
-        return k;
-    }
-
-    @Test
-    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
-    int testPollutedNoWrite(boolean cond, int l) {
-        Shape obj1 = new Square(l);
-        Shape obj2 = new Square(l);
-        Shape obj = null;
-        int res = 0;
-
-        if (cond) {
-            obj = obj1;
-        } else {
-            obj = obj2;
-        }
-
-        for (int i=1; i<132; i++) {
-            res += obj.x;
-        }
-
-        return res + obj1.x + obj2.y;
-    }
-
-    @Test
-    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
-    // just 2 allocations because initial p3 will always be dead
-    int testThreeWayAliasedAlloc(boolean cond, int x, int y) {
-        Point p1 = new Point(x, y);
-        Point p2 = new Point(x+1, y+1);
-        Point p3 = new Point(x+2, y+2);
-
-        if (cond) {
-            p3 = p1;
-        } else {
-            p3 = p2;
-        }
-
-        return p3.x + p3.y;
-    }
-
-    @Test
-    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
-    int TestTrapAfterMerge(boolean cond, int x, int y) {
-        Point p = new Point(x, x);
-
-        if (cond) {
-            p = new Point(y, y);
-        }
-
-        for (int i=402; i<432; i+=x) {
-            x++;
-        }
-
-        return p.x + x;
-    }
-
-    @Test
-    @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2" })
-    int testMergedWithDeadCode(boolean cond, int x) {
-        ADefaults obj1 = new ADefaults(x);
-        ADefaults obj2 = new ADefaults();
-        ADefaults obj = cond ? obj1 : obj2;
-
-        return obj1.i + obj.ble + 1082;
     }
 
 

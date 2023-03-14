@@ -503,6 +503,71 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
   return true;
 }
 
+void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* phi, GrowableArray<Node *>  &alloc_worklist) {
+  // Iterate over Phi outputs looking for an AddP
+  for (int j = phi->outcnt()-1; j >= 0; ) {
+    Node* previous_addp = phi->raw_out(j);
+    if (previous_addp->is_AddP()) {
+      // All AddPs are present in the connection graph
+      FieldNode* fn = ptnode_adr(previous_addp->_idx)->as_Field();
+      uint num_edges = previous_addp->in(AddPNode::Address) == previous_addp->in(AddPNode::Base) ? 2 : 1;
+
+      for (int k = previous_addp->outcnt()-1; k >= 0; ) {
+        Node* previous_load = previous_addp->raw_out(k);
+        if (previous_load->is_Load()) {
+          Node* data_phi = previous_load->as_Load()->split_through_phi(_igvn);
+          _igvn->replace_node(previous_load, data_phi);
+
+          // Push the newly created AddP on alloc_worklist and patch
+          // the connection graph. Note that the changes in the CG below
+          // won't affect the ES of objects since the new nodes have the
+          // same status as the old ones.
+          if (data_phi != NULL && data_phi->is_Phi()) {
+            for (uint i = 1; i < data_phi->req(); i++) {
+              Node* new_load = data_phi->in(i);
+              if (new_load->is_Load()) {
+                Node* new_addp = new_load->in(MemNode::Address);
+                Node* base = get_addp_base(new_addp);
+                PointsToNode* ptn_base = ptnode_adr(base->_idx);
+
+                // The base might not be a unique type. E.g., it might a Phi as well.
+                PointsToNode* uniq = unique_java_object(base);
+                if (ptn_base == NULL ||
+                    !ptn_base->scalar_replaceable() || uniq == NULL || uniq == phantom_obj) {
+                  continue;
+                }
+
+                alloc_worklist.append_if_missing(new_addp);
+
+                _nodes.at_grow(new_addp->_idx, NULL);
+                add_field(new_addp, fn->escape_state(), fn->offset());
+                add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptn_base);
+
+                // If the load doesn't load an object then it won't be
+                // part of the connection graph
+                PointsToNode* curr_load_ptn = ptnode_adr(previous_load->_idx);
+                if (curr_load_ptn != NULL) {
+                  _nodes.at_grow(new_load->_idx, NULL);
+                  add_local_var(new_load, curr_load_ptn->escape_state());
+                  add_edge(ptnode_adr(new_load->_idx), ptnode_adr(new_addp->_idx)->as_Field());
+                }
+              }
+            }
+          }
+        }
+        --k;
+        k = MIN(k, previous_addp->outcnt()-1);
+      }
+
+      // Remove the old AddP from the processing list because it's dead now
+      alloc_worklist.remove_if_existing(previous_addp);
+
+      j -= num_edges;
+      j = MIN(j, phi->outcnt()-1);
+    }
+  }
+}
+
 // This method will create SafePointScalarObjectNode for each combination of
 // scalar replaceable allocation in 'var' and SafePoint node in 'safepoints'.
 // Each SafePointScalarObjectNodes created here may describe multiple scalar
@@ -3640,81 +3705,8 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
       }
       // Reducible Phi's will be removed from the graph after split_unique_types finishes
       if (reducible_merges.member(n)) {
-        Node* phi = n;
-
         // Split loads through phi
-        for (DUIterator_Fast jmax, j = phi->fast_outs(jmax); j < jmax; j++) {
-          Node* addp = phi->fast_out(j);
-          if (addp->is_AddP()) {
-            FieldNode* fn = ptnode_adr(addp->_idx)->as_Field();
-            uint num_edges = addp->in(AddPNode::Address) == addp->in(AddPNode::Base) ? 2 : 1;
-            for (DUIterator k = addp->outs(); addp->has_out(k); k++) {
-              Node* load = addp->out(k);
-              if (load->is_Load()) {
-                PointsToNode* curr_load_ptn = ptnode_adr(load->_idx);
-                Node* data_phi = load->as_Load()->split_through_phi(_igvn);
-                assert(data_phi != load, "sanity");
-
-                intptr_t ignore = 0;
-                Node* address = load->in(MemNode::Address);
-                Node*    base = AddPNode::Ideal_base_and_offset(address, _igvn, ignore);
-                const TypeOopPtr *t_oop = _igvn->type(address)->isa_oopptr();
-                bool load_boxed_values = t_oop != NULL && t_oop->is_ptr_to_boxed_value() && _compile->aggressive_unboxing() &&
-                           (base != NULL) && (base == address->in(AddPNode::Base)) &&
-                           _igvn->type(base)->higher_equal(TypePtr::NOTNULL);
-                tty->print_cr("load_boxed_values %d, phi %d load %d", load_boxed_values, phi->_idx, load->_idx);
-
-                _igvn->replace_node(load, data_phi);
-                k = addp->refresh_out_pos(k);
-
-                // Push the newly created AddP on alloc_worklist and patch
-                // the connection graph. Note that the changes in the CG below
-                // won't affect the ES of objects since the new nodes have the
-                // same status as the old ones.
-                if (data_phi != NULL && data_phi->is_Phi()) {
-                  for (uint i = 1; i < data_phi->req(); i++) {
-                    Node* new_load = data_phi->in(i);
-                    if (new_load->is_Load()) {
-                      // AddP's are always present in the connection graph. No
-                      // matter what the type of the field.
-                      Node* new_addp = new_load->in(MemNode::Address);
-                      Node* base = get_addp_base(new_addp);
-                      PointsToNode* ptn_base = ptnode_adr(base->_idx);
-
-                      // The base might not be a unique type. E.g., it might a Phi as well.
-                      PointsToNode* uniq = unique_java_object(base);
-                      if (ptn_base == NULL ||
-                         !ptn_base->scalar_replaceable() || uniq == NULL || uniq == phantom_obj) {
-                        continue;
-                      }
-
-                      alloc_worklist.append_if_missing(new_addp);
-
-                      _nodes.at_grow(new_addp->_idx, NULL);
-                      add_field(new_addp, fn->escape_state(), fn->offset());
-                      add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptn_base);
-
-                      // If the load doesn't load an object then it won't be
-                      // part of the connection graph
-                      if (curr_load_ptn != NULL) {
-                        _nodes.at_grow(new_load->_idx, NULL);
-                        add_local_var(new_load, curr_load_ptn->escape_state());
-                        add_edge(ptnode_adr(new_load->_idx), ptnode_adr(new_addp->_idx)->as_Field());
-                      }
-                    }
-                  }
-                }
-              }
-            }
-
-            // Remove the old AddP from the processing list because it's dead now
-            alloc_worklist.remove_if_existing(addp);
-
-            --j;
-            jmax -= num_edges;
-          }
-        }
-
+        reduce_this_phi_on_field_access(n->as_Phi(), alloc_worklist);
         continue;
       }
       JavaObjectNode* jobj = unique_java_object(n);
