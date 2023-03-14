@@ -478,7 +478,7 @@
   product(bool, ReduceAllocationMerges, true,                               \
           "Try to simplify allocation merges before Scalar Replacement")    \
                                                                             \
-  develop(bool, TraceReduceAllocationMerges, false,                         \
+  develop(bool, TraceReduceAllocationMerges, true,                          \
           "Trace decision for simplifying allocation merges.")              \
                                                                             \
   product(bool, DoEscapeAnalysis, true,                                     \

@@ -245,6 +245,7 @@ public:
   virtual Node *Ideal(PhaseGVN *phase, bool can_reshape);
 
   // Split instance field load through Phi.
+  bool can_split_through_phi(PhaseGVN *phase);
   Node* split_through_phi(PhaseGVN *phase);
 
   // Recover original value from boxed values

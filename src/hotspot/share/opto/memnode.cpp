@@ -1519,6 +1519,71 @@ static bool stable_phi(PhiNode* phi, PhaseGVN *phase) {
   return true;
 }
 //------------------------------split_through_phi------------------------------
+// Check if we can split field load through Phi.
+bool LoadNode::can_split_through_phi(PhaseGVN* phase) {
+  if (req() > 3) {
+    assert(is_LoadVector() && Opcode() != Op_LoadVector, "load has too many inputs");
+    return false;
+  }
+  Node* mem     = in(Memory);
+  Node* address = in(Address);
+  const TypeOopPtr *t_oop = phase->type(address)->isa_oopptr();
+
+  Compile* C = phase->C;
+  intptr_t ignore = 0;
+  Node*    base = AddPNode::Ideal_base_and_offset(address, phase, ignore);
+  bool base_is_phi = (base != NULL) && base->is_Phi();
+
+  if (!mem->is_Phi() && !base_is_phi) {
+    return false; // Neither memory or base are Phi
+  }
+
+  if (mem->is_Phi() && !stable_phi(mem->as_Phi(), phase)) {
+    return false; // Wait stable graph
+  }
+  if (base_is_phi) {
+    if (!stable_phi(base->as_Phi(), phase)) {
+      return false; // Wait stable graph
+    }
+    uint cnt = base->req();
+    // Check for loop invariant memory.
+    if (cnt == 3) {
+      for (uint i = 1; i < cnt; i++) {
+        if (base->in(i) == base) {
+          return false; // Wait stable graph
+        }
+      }
+    }
+  }
+
+  // Do nothing here if Identity will find a value
+  // (to avoid infinite chain of value phis generation).
+  if (this != Identity(phase)) {
+    return false;
+  }
+
+  if (!base_is_phi) {
+    assert(mem->is_Phi(), "sanity");
+    // Skip if the region dominates some control edge of the address.
+    if (!MemNode::all_controls_dominate(address, mem->in(0)))
+      return false;
+  } else {
+    if (!mem->is_Phi()) {
+      assert(base_is_phi, "sanity");
+      // Skip if the region dominates some control edge of the memory.
+      if (!MemNode::all_controls_dominate(mem, base->in(0)))
+        return false;
+    } else if (base->in(0) != mem->in(0)) {
+      assert(base_is_phi && mem->is_Phi(), "sanity");
+      if (!MemNode::all_controls_dominate(mem, base->in(0))) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+}
+//------------------------------split_through_phi------------------------------
 // Split instance or boxed field load through Phi.
 Node* LoadNode::split_through_phi(PhaseGVN* phase) {
   if (req() > 3) {
@@ -1530,21 +1595,16 @@ Node* LoadNode::split_through_phi(PhaseGVN* phase) {
   Node* address = in(Address);
   const TypeOopPtr *t_oop = phase->type(address)->isa_oopptr();
 
-  assert((t_oop != NULL) &&
-         (t_oop->is_known_instance_field() ||
-          t_oop->is_ptr_to_boxed_value()), "invalid conditions");
-
   Compile* C = phase->C;
   intptr_t ignore = 0;
   Node*    base = AddPNode::Ideal_base_and_offset(address, phase, ignore);
   bool base_is_phi = (base != NULL) && base->is_Phi();
-  bool load_boxed_values = t_oop->is_ptr_to_boxed_value() && C->aggressive_unboxing() &&
+  bool load_boxed_values = t_oop != NULL && t_oop->is_ptr_to_boxed_value() && C->aggressive_unboxing() &&
                            (base != NULL) && (base == address->in(AddPNode::Base)) &&
                            phase->type(base)->higher_equal(TypePtr::NOTNULL);
 
-  if (!((mem->is_Phi() || base_is_phi) &&
-        (load_boxed_values || t_oop->is_known_instance_field()))) {
-    return NULL; // memory is not Phi
+  if (!mem->is_Phi() && !base_is_phi) {
+    return NULL; // Neither memory or base are Phi
   }
 
   if (mem->is_Phi()) {
@@ -1561,7 +1621,7 @@ Node* LoadNode::split_through_phi(PhaseGVN* phase) {
           if (i == 1) {
             // if the first edge was a loop, check second edge too.
             // If both are replaceable - we are in an infinite loop
-            Node *n = optimize_memory_chain(mem->in(2), t_oop, this, phase);
+            Node* n = optimize_memory_chain(mem->in(2), t_oop, this, phase);
             if (n == mem) {
               break;
             }
@@ -1586,9 +1646,6 @@ Node* LoadNode::split_through_phi(PhaseGVN* phase) {
       }
     }
   }
-
-  // Split through Phi (see original code in loopopts.cpp).
-  assert(C->have_alias_type(t_oop), "instance should have alias type");
 
   // Do nothing here if Identity will find a value
   // (to avoid infinite chain of value phis generation).
@@ -1624,16 +1681,19 @@ Node* LoadNode::split_through_phi(PhaseGVN* phase) {
     region = mem->in(0);
   }
 
+  Node* phi = nullptr;
   const Type* this_type = this->bottom_type();
-  int this_index  = C->get_alias_index(t_oop);
-  int this_offset = t_oop->offset();
-  int this_iid    = t_oop->instance_id();
-  if (!t_oop->is_known_instance() && load_boxed_values) {
-    // Use _idx of address base for boxed values.
-    this_iid = base->_idx;
-  }
   PhaseIterGVN* igvn = phase->is_IterGVN();
-  Node* phi = new PhiNode(region, this_type, NULL, mem->_idx, this_iid, this_index, this_offset);
+
+  if (t_oop != NULL && (t_oop->is_known_instance_field() || load_boxed_values)) {
+    int this_index = C->get_alias_index(t_oop);
+    int this_offset = t_oop->offset();
+    int this_iid = t_oop->is_known_instance_field() ? t_oop->instance_id() : base->_idx;
+    phi = new PhiNode(region, this_type, NULL, mem->_idx, this_iid, this_index, this_offset);
+  } else {
+    phi = new PhiNode(region, this_type, NULL, mem->_idx);
+  }
+
   for (uint i = 1; i < region->req(); i++) {
     Node* x;
     Node* the_clone = NULL;
