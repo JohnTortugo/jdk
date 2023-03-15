@@ -531,7 +531,7 @@ public:
 //                       identifying the input of the original allocation merge
 //                       that should be used during execution.
 //
-//    SafePoint->in(_merge_pointer_idx + 0) ----> Phi(Region, ccpp, NULL, NULL)
+//    SafePoint->in(_merge_pointer_idx + 0) ----> Phi(Region, ccpp, nullptr, nullptr)
 //    SafePoint->in(_merge_pointer_idx + 1) ----> Phi(Region,   -1,    0,    1)
 //
 //    In the example above the last two objects participating in the merge were
@@ -540,7 +540,7 @@ public:
 //    as in Scenario 1 above. The only difference is that we add a reference
 //    to the Klass of the SR'ed object before the list of fields.
 //
-//    SafePoint->in(_merge_pointer_idx + 0) ----> Phi(Region, ccpp, NULL, NULL)
+//    SafePoint->in(_merge_pointer_idx + 0) ----> Phi(Region, ccpp, nullptr, nullptr)
 //    SafePoint->in(_merge_pointer_idx + 1) ----> Phi(Region,   -1,    0,    1)
 //    SafePoint->in(_merge_pointer_idx + 2) ----> "Point#Klass"
 //    SafePoint->in(_merge_pointer_idx + 3) --------> Parm4
@@ -610,12 +610,12 @@ public:
   bool is_from_merge() const { return _merge_pointer_idx >= 0; }
 
   int merge_pointer_idx(JVMState* jvms) const {
-    assert(jvms != NULL, "JVMS reference is NULL.");
+    assert(jvms != nullptr, "JVMS reference is null.");
     return jvms->scloff() + _merge_pointer_idx;
   }
 
   int selector_idx(JVMState* jvms) const {
-    assert(jvms != NULL, "JVMS reference is NULL.");
+    assert(jvms != nullptr, "JVMS reference is null.");
     return jvms->scloff() + _merge_pointer_idx + 1;
   }
 

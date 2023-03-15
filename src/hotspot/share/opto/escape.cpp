@@ -43,6 +43,11 @@
 #include "utilities/macros.hpp"
 
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
+  // If ReduceAllocationMerges is enabled we might call split_through_phi during
+  // split_unique_types and that will create additional nodes that need to be
+  // pushed to the ConnectionGraph. The code below bumps the initial capacity of
+  // _nodes by 10% to account for these additional nodes. If capacity is exceeded
+  // the array will be reallocated.
   _nodes(C->comp_arena(), ReduceAllocationMerges ? C->unique()*1.10 : C->unique(), C->unique(), nullptr),
   _in_worklist(C->comp_arena()),
   _next_pidx(0),
@@ -57,6 +62,7 @@ ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation
   // Add unknown java object.
   add_java_object(C->top(), PointsToNode::GlobalEscape);
   phantom_obj = ptnode_adr(C->top()->_idx)->as_JavaObject();
+  // Add ConP and ConN null oop nodes
   set_not_scalar_replaceable(phantom_obj NOT_PRODUCT(COMMA "Phantom object"));
   Node* oop_null = igvn->zerocon(T_OBJECT);
   assert(oop_null->_idx < nodes_size(), "should be created already");
@@ -309,6 +315,10 @@ bool ConnectionGraph::compute_escape() {
     find_scalar_replaceable_allocs(jobj_worklist);
   }
 
+  // alloc_worklist will be processed in reverse push order.
+  // Therefore the reducible Phis will be processed for last and that's what we
+  // want because by then the scalarizable inputs of the merge will already have
+  // an unique instance type.
   for (uint i = 0; i < reducible_merges.size(); i++ ) {
     Node* n = reducible_merges.at(i);
     alloc_worklist.append(n);
@@ -393,7 +403,7 @@ bool ConnectionGraph::compute_escape() {
     _igvn->set_delay_transform(true);
     for (uint i = 0; i < reducible_merges.size(); i++ ) {
       Node* n = reducible_merges.at(i);
-      reduce_this_phi(ptnode_adr(n->_idx)->as_LocalVar());
+      reduce_this_phi(n->as_Phi());
     }
     _igvn->set_delay_transform(delay);
   }
@@ -436,11 +446,11 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
 
     // We are looking for at least one SR object in the merge
     JavaObjectNode* ptn = unique_java_object(phi->in(i));
-    if (ptn != NULL && ptn->scalar_replaceable()) {
-      assert(ptn->ideal_node() != NULL && ptn->ideal_node()->is_Allocate(), "sanity");
+    if (ptn != nullptr && ptn->scalar_replaceable()) {
+      assert(ptn->ideal_node() != nullptr && ptn->ideal_node()->is_Allocate(), "sanity");
       Node* alloc = ptn->ideal_node()->as_Allocate();
 
-      if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc->as_Allocate(), NULL, true)) {
+      if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc->as_Allocate(), nullptr, true)) {
         found_sr_allocate = true;
       } else {
         ptn->set_scalar_replaceable(false);
@@ -467,7 +477,7 @@ bool ConnectionGraph::can_reduce_this_phi_users(PhiNode* phi) const {
       Node* addp = use;
       for (DUIterator_Fast jmax, j = addp->fast_outs(jmax); j < jmax; j++) {
         Node* use_use = addp->fast_out(j);
-        if (!use_use->is_Load() || !use_use->as_Load()->can_split_through_phi(_igvn)) {
+        if (!use_use->is_Load() || !use_use->as_Load()->can_split_through_phi_base(_igvn)) {
           NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. AddP user isn't a [splittable] Load(): %s", phi->_idx, _invocation, use_use->Name());)
           return false;
         }
@@ -490,7 +500,7 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
 
   PhiNode* phi = var->ideal_node()->as_Phi();
   const Type* phi_t = _igvn->type(phi);
-  if (phi_t == NULL || phi_t->isa_instptr() == NULL || !phi_t->is_instptr()->klass_is_exact()) {
+  if (phi_t == nullptr || phi_t->isa_instptr() == nullptr || !phi_t->is_instptr()->klass_is_exact()) {
     return false;
   }
 
@@ -502,26 +512,34 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
   return true;
 }
 
-void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* phi, GrowableArray<Node *>  &alloc_worklist) {
+void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* ophi, GrowableArray<Node *>  &alloc_worklist) {
+  // We'll pass this to 'split_through_phi' so that it'll do the split even
+  // though the load doesn't have an unique instance type.
+  bool ignore_missing_instance_id = true;
+
   // Iterate over Phi outputs looking for an AddP
-  for (int j = phi->outcnt()-1; j >= 0; ) {
-    Node* previous_addp = phi->raw_out(j);
+  for (int j = ophi->outcnt()-1; j >= 0;) {
+    Node* previous_addp = ophi->raw_out(j);
+    uint num_edges = 1;
     if (previous_addp->is_AddP()) {
       // All AddPs are present in the connection graph
       FieldNode* fn = ptnode_adr(previous_addp->_idx)->as_Field();
-      uint num_edges = previous_addp->in(AddPNode::Address) == previous_addp->in(AddPNode::Base) ? 2 : 1;
+      num_edges = previous_addp->in(AddPNode::Address) == previous_addp->in(AddPNode::Base) ? 2 : 1;
 
-      for (int k = previous_addp->outcnt()-1; k >= 0; ) {
+      // Iterate over AddP looking for a Load
+      for (int k = previous_addp->outcnt()-1; k >= 0;) {
         Node* previous_load = previous_addp->raw_out(k);
         if (previous_load->is_Load()) {
-          Node* data_phi = previous_load->as_Load()->split_through_phi(_igvn);
+          Node* data_phi = previous_load->as_Load()->split_through_phi(_igvn, ignore_missing_instance_id);
           _igvn->replace_node(previous_load, data_phi);
+          assert(data_phi != nullptr, "Output of split_through_phi is null.");
+          assert(data_phi != previous_load, "Output of split_through_phi is same as input.");
 
           // Push the newly created AddP on alloc_worklist and patch
           // the connection graph. Note that the changes in the CG below
           // won't affect the ES of objects since the new nodes have the
           // same status as the old ones.
-          if (data_phi != NULL && data_phi->is_Phi()) {
+          if (data_phi != nullptr && data_phi->is_Phi()) {
             for (uint i = 1; i < data_phi->req(); i++) {
               Node* new_load = data_phi->in(i);
               if (new_load->is_Load()) {
@@ -529,24 +547,27 @@ void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* phi, GrowableArra
                 Node* base = get_addp_base(new_addp);
                 PointsToNode* ptn_base = ptnode_adr(base->_idx);
 
-                // The base might not be a unique type. E.g., it might a Phi as well.
+                // The base might not be something that we can create an unique type for.
+                // If that's the case we are done with that input.
                 PointsToNode* uniq = unique_java_object(base);
-                if (ptn_base == NULL ||
-                    !ptn_base->scalar_replaceable() || uniq == NULL || uniq == phantom_obj) {
+                if (ptn_base == nullptr ||
+                    !ptn_base->scalar_replaceable() || uniq == nullptr || uniq == phantom_obj) {
                   continue;
                 }
 
+                // Push to alloc_worklist since the base has an unique_type
                 alloc_worklist.append_if_missing(new_addp);
 
-                _nodes.at_grow(new_addp->_idx, NULL);
+                // Now let's add the node to the connection graph
+                _nodes.at_grow(new_addp->_idx, nullptr);
                 add_field(new_addp, fn->escape_state(), fn->offset());
                 add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptn_base);
 
                 // If the load doesn't load an object then it won't be
                 // part of the connection graph
                 PointsToNode* curr_load_ptn = ptnode_adr(previous_load->_idx);
-                if (curr_load_ptn != NULL) {
-                  _nodes.at_grow(new_load->_idx, NULL);
+                if (curr_load_ptn != nullptr) {
+                  _nodes.at_grow(new_load->_idx, nullptr);
                   add_local_var(new_load, curr_load_ptn->escape_state());
                   add_edge(ptnode_adr(new_load->_idx), ptnode_adr(new_addp->_idx)->as_Field());
                 }
@@ -555,15 +576,14 @@ void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* phi, GrowableArra
           }
         }
         --k;
-        k = MIN(k, previous_addp->outcnt()-1);
+        k = MIN(k, (int)previous_addp->outcnt()-1);
       }
 
       // Remove the old AddP from the processing list because it's dead now
       alloc_worklist.remove_if_existing(previous_addp);
-
-      j -= num_edges;
-      j = MIN(j, phi->outcnt()-1);
     }
+    j -= num_edges;
+    j = MIN(j, (int)ophi->outcnt()-1);
   }
 }
 
@@ -573,10 +593,8 @@ void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* phi, GrowableArra
 // replaced objects - check detailed description in SafePointScalarObjectNode
 // class header.
 //
-// This method will set to 'NULL' entries in the Phi that are scalar replaceable.
-void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_Node_List* safepoints) {
-  assert(var->ideal_node()->is_Phi(), "Not a Phi!");
-  PhiNode* ophi             = var->ideal_node()->as_Phi();
+// This method will set to 'nullptr' entries in the Phi that are scalar replaceable.
+void ConnectionGraph::reduce_this_phi_on_safepoints(PhiNode* ophi, Unique_Node_List* safepoints) {
   Node* minus_one           = _igvn->register_new_node_with_optimizer(ConINode::make(-1));
   Node* selector            = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), minus_one, TypeInt::INT));
   Node* null_ptr            = _igvn->makecon(TypePtr::NULL_PTR);
@@ -594,7 +612,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
    Node* base          = ophi->in(i);
    JavaObjectNode* ptn = unique_java_object(base);
 
-   if (ptn != NULL && ptn->scalar_replaceable()) {
+   if (ptn != nullptr && ptn->scalar_replaceable()) {
      Node* sr_obj_idx = _igvn->register_new_node_with_optimizer(ConINode::make(number_of_sr_objects));
      selector->set_req(i, sr_obj_idx);
      number_of_sr_objects++;
@@ -622,7 +640,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
 
      // If the base is not scalar replaceable we don't need to register information about
      // it at this time.
-     if (ptn == NULL || !ptn->scalar_replaceable()) {
+     if (ptn == nullptr || !ptn->scalar_replaceable()) {
        continue;
      }
 
@@ -633,7 +651,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
      Node* ccpp                 = alloc->result_cast();
      const TypeOopPtr* res_type = _igvn->type(ccpp)->isa_oopptr();
      Node* base_klass_node      = alloc->in(AllocateNode::KlassNode);
-     assert(base_klass_node != NULL, "This shouldn't happen.");
+     assert(base_klass_node != nullptr, "This shouldn't happen.");
 
      call->add_req(base_klass_node);
 
@@ -641,7 +659,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
        ciField* field            = iklass->nonstatic_field_at(j);
        ciType* elem_type         = field->type();
        BasicType basic_elem_type = field->layout_type();
-       const Type* field_type    = NULL;
+       const Type* field_type    = nullptr;
        const TypeOopPtr *field_adr_type = res_type->add_offset(field->offset())->isa_oopptr();
 
        if (is_reference_type(basic_elem_type)) {
@@ -660,7 +678,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
        }
 
        Node* field_val = PhaseMacroExpand::value_from_mem(_compile, _igvn, memory, ctrl, basic_elem_type, field_type, field_adr_type, alloc);
-       assert(field_val != NULL, "field_val is NULL");
+       assert(field_val != nullptr, "field_val is null");
 
        call->add_req(field_val);
      }
@@ -671,7 +689,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
 
    SafePointScalarObjectNode* sobj = new SafePointScalarObjectNode(merge_t,
 #ifdef ASSERT
-   NOT_PRODUCT(NULL),
+   NOT_PRODUCT(nullptr),
 #endif
                                                                    /* first_index */ 0,
                                                                    /* n_fields */ 0,
@@ -695,7 +713,7 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
     Node* base          = ophi->in(i);
     JavaObjectNode* ptn = unique_java_object(base);
 
-    if (ptn != NULL && ptn->scalar_replaceable()) {
+    if (ptn != nullptr && ptn->scalar_replaceable()) {
       new_phi->set_req(i, null_ptr);
     }
     else {
@@ -708,12 +726,11 @@ void ConnectionGraph::reduce_this_phi_on_safepoints(LocalVarNode* var, Unique_No
   _igvn->_worklist.push(ophi);
 }
 
-void ConnectionGraph::reduce_this_phi(LocalVarNode* var) {
-  Node* phi = var->ideal_node();
+void ConnectionGraph::reduce_this_phi(PhiNode* ophi) {
   Unique_Node_List safepoints;
 
-  for (uint i = 0; i < phi->outcnt(); i++) {
-    Node* use = phi->raw_out(i);
+  for (uint i = 0; i < ophi->outcnt(); i++) {
+    Node* use = ophi->raw_out(i);
 
     // All SafePoint nodes using the same Phi node uses the same debug
     // information (regarding to the Phi). Furthermore, reducing the Phi used
@@ -727,7 +744,7 @@ void ConnectionGraph::reduce_this_phi(LocalVarNode* var) {
   }
 
   if (safepoints.size() > 0) {
-    reduce_this_phi_on_safepoints(var, &safepoints);
+    reduce_this_phi_on_safepoints(ophi, &safepoints);
   }
 }
 
@@ -3677,7 +3694,7 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
       }
     } else if (n->is_AddP()) {
       Node* addp_base = get_addp_base(n);
-      if (addp_base != NULL && reducible_merges.member(addp_base)) {
+      if (addp_base != nullptr && reducible_merges.member(addp_base)) {
         // This AddP will go away when we reduce the the Phi
         continue;
       }
