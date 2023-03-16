@@ -439,7 +439,8 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
 
   for (uint i = 1; i < phi->req(); i++) {
     // Right now we can't restore a "null" pointer during deoptimization
-    if (_igvn->type(phi->in(i))->maybe_null()) {
+    const Type* inp_t = _igvn->type(phi->in(i));
+    if (inp_t == nullptr || inp_t->make_oopptr() == nullptr || inp_t->make_oopptr()->maybe_null()) {
       NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. Input %d is nullable.", phi->_idx, _invocation, i);)
       return false;
     }
@@ -500,7 +501,9 @@ bool ConnectionGraph::can_reduce_this_phi(PointsToNode* var) const {
 
   PhiNode* phi = var->ideal_node()->as_Phi();
   const Type* phi_t = _igvn->type(phi);
-  if (phi_t == nullptr || phi_t->isa_instptr() == nullptr || !phi_t->is_instptr()->klass_is_exact()) {
+  if (phi_t == nullptr || phi_t->make_ptr() == nullptr ||
+                          phi_t->make_ptr()->isa_instptr() == nullptr ||
+                          !phi_t->make_ptr()->isa_instptr()->klass_is_exact()) {
     return false;
   }
 
@@ -576,14 +579,14 @@ void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* ophi, GrowableArr
           }
         }
         --k;
-        k = MIN(k, (int)previous_addp->outcnt()-1);
+        k = MIN2(k, (int)previous_addp->outcnt()-1);
       }
 
       // Remove the old AddP from the processing list because it's dead now
       alloc_worklist.remove_if_existing(previous_addp);
     }
     j -= num_edges;
-    j = MIN(j, (int)ophi->outcnt()-1);
+    j = MIN2(j, (int)ophi->outcnt()-1);
   }
 }
 

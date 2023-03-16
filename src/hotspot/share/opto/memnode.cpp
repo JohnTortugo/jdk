@@ -1519,55 +1519,28 @@ static bool stable_phi(PhiNode* phi, PhaseGVN *phase) {
   return true;
 }
 //------------------------------split_through_phi------------------------------
-// Check if we can split field load through the Phi merging AddP bases.
-// This node is essentially a copy of the validations performed by
-// 'split_through_phi'. The first use of this method was in EA code as
-// part of simplification of allocation merges.
+// Check whether a call to 'split_through_phi' would split this load through the
+// Phi *base*. This method is essentially a copy of the validations performed
+// by 'split_through_phi'. The first use of this method was in EA code as part
+// of simplification of allocation merges.
 bool LoadNode::can_split_through_phi_base(PhaseGVN* phase) {
-  if (req() > 3) {
+  Node* mem        = in(Memory);
+  Node* address    = in(Address);
+  intptr_t ignore  = 0;
+  Node*    base    = AddPNode::Ideal_base_and_offset(address, phase, ignore);
+  bool base_is_phi = (base != nullptr) && base->is_Phi();
+
+  if (req() > 3 || !base_is_phi) {
     return false;
   }
 
-  Node* mem     = in(Memory);
-  Node* address = in(Address);
-
-  intptr_t ignore = 0;
-  Node*    base = AddPNode::Ideal_base_and_offset(address, phase, ignore);
-  bool base_is_phi = (base != NULL) && base->is_Phi();
-
-  if (base_is_phi) {
-    if (!stable_phi(base->as_Phi(), phase)) {
-      return false; // Wait stable graph
+  if (!mem->is_Phi()) {
+    if (!MemNode::all_controls_dominate(mem, base->in(0)))
+      return false;
+  } else if (base->in(0) != mem->in(0)) {
+    if (!MemNode::all_controls_dominate(mem, base->in(0))) {
+      return false;
     }
-    uint cnt = base->req();
-    // Check for loop invariant memory.
-    if (cnt == 3) {
-      for (uint i = 1; i < cnt; i++) {
-        if (base->in(i) == base) {
-          return false; // Wait stable graph
-        }
-      }
-    }
-  } else {
-    return false;
-  }
-
-  // If the Memory is Phi and not stable it won't split
-  if (mem->is_Phi() && !stable_phi(mem->as_Phi(), phase)) {
-    return false; // Wait stable graph
-  }
-
-  // Do nothing if Identity will find a value
-  // (to avoid infinite chain of value phis generation).
-  if (this != Identity(phase)) {
-    return false;
-  }
-
-  // If reached here then base is a stable Phi
-
-  if (base->in(0) != mem->in(0) &&
-      !MemNode::all_controls_dominate(mem, base->in(0))) {
-    return false;
   }
 
   return true;
