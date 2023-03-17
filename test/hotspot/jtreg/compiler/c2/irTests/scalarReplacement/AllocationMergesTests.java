@@ -482,7 +482,7 @@ public class AllocationMergesTests {
 
     @Test
     @Arguments({ Argument.RANDOM_EACH, Argument.RANDOM_EACH, Argument.RANDOM_EACH })
-    @IR(counts = { IRNode.ALLOC, "2", applyIf = {"UseCompressedOops", "false"} })
+    @IR(counts = { IRNode.ALLOC, "2" }, applyIf = { "UseCompressedOops", "false" })
     // The two Picture objects will be removed. The nested Point objects won't
     // be removed because the Phi merging them will have a DecodeN user - which
     // currently isn't supported. The 'applyIf' directive is needed to make the
