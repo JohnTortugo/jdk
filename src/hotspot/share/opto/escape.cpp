@@ -399,6 +399,8 @@ bool ConnectionGraph::compute_escape() {
 
   // 6. Remove reducible allocation merges from ideal graph
   if (ReduceAllocationMerges && reducible_merges.size() > 0) {
+    //tty->print_cr("Going to reduce %d Phis in %s::%s", reducible_merges.size(), _compile->method()->holder()->name()->as_utf8(), _compile->method()->name()->as_utf8());
+
     bool delay = _igvn->delay_transform();
     _igvn->set_delay_transform(true);
     for (uint i = 0; i < reducible_merges.size(); i++ ) {
@@ -437,11 +439,13 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
   // Check if there is an scalar replaceable allocate in the Phi
   bool found_sr_allocate = false;
 
+  //phi->dump();
+
   for (uint i = 1; i < phi->req(); i++) {
     // Right now we can't restore a "null" pointer during deoptimization
     const Type* inp_t = _igvn->type(phi->in(i));
     if (inp_t == nullptr || inp_t->make_oopptr() == nullptr || inp_t->make_oopptr()->maybe_null()) {
-      NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. Input %d is nullable.", phi->_idx, _invocation, i);)
+      NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print("Can NOT reduce Phi %d on invocation %d. Input %d is nullable.", phi->_idx, _invocation, i); phi->in(i)->dump();)
       return false;
     }
 
@@ -449,17 +453,21 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
     JavaObjectNode* ptn = unique_java_object(phi->in(i));
     if (ptn != nullptr && ptn->scalar_replaceable()) {
       assert(ptn->ideal_node() != nullptr && ptn->ideal_node()->is_Allocate(), "sanity");
-      Node* alloc = ptn->ideal_node()->as_Allocate();
+      AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
 
-      if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc->as_Allocate(), nullptr, true)) {
+      if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc, nullptr, true)) {
         found_sr_allocate = true;
+//        tty->print_cr("is SR and CAN be eliminated.");
       } else {
         ptn->set_scalar_replaceable(false);
+//        tty->print_cr("is SR but CAN NOT be eliminated. alloc is %s", alloc->_is_scalar_replaceable ? "SR" : "NSR");
       }
+    } else {
+      //tty->print("\t phi->in(%d) -> %s", i, ptn == nullptr ? "nullptr" : ""); if (ptn != nullptr) ptn->dump();
     }
   }
 
-  NOT_PRODUCT(if (TraceReduceAllocationMerges && !found_sr_allocate) tty->print_cr("Can NOT reduce Phi %d on invocation %d. No SR Allocate as input.", phi->_idx, _invocation);)
+  NOT_PRODUCT(if (TraceReduceAllocationMerges && !found_sr_allocate) tty->print_cr("\tCan NOT reduce Phi %d on invocation %d. No SR Allocate as input.", phi->_idx, _invocation);)
   return found_sr_allocate;
 }
 
