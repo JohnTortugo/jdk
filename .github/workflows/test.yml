@@ -65,14 +65,8 @@ jobs:
           - 'hs/tier4'
 
         include:
-          - test-name: 'jdk/tier1 part 1'
-            test-suite: 'test/jdk/:tier1_part1'
-
-          - test-name: 'jdk/tier1 part 2'
-            test-suite: 'test/jdk/:tier1_part2'
-
-          - test-name: 'jdk/tier1 part 3'
-            test-suite: 'test/jdk/:tier1_part3'
+          - test-name: 'jdk/tier1'
+            test-suite: 'test/jdk/:tier1'
 
           - test-name: 'jdk/tier2'
             test-suite: 'test/jdk/:tier2'
