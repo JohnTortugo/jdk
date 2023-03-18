@@ -439,8 +439,6 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
   // Check if there is an scalar replaceable allocate in the Phi
   bool found_sr_allocate = false;
 
-  //phi->dump();
-
   for (uint i = 1; i < phi->req(); i++) {
     // Right now we can't restore a "null" pointer during deoptimization
     const Type* inp_t = _igvn->type(phi->in(i));
@@ -457,13 +455,9 @@ bool ConnectionGraph::can_reduce_this_phi_inputs(PhiNode* phi) const {
 
       if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc, nullptr, true)) {
         found_sr_allocate = true;
-//        tty->print_cr("is SR and CAN be eliminated.");
       } else {
         ptn->set_scalar_replaceable(false);
-//        tty->print_cr("is SR but CAN NOT be eliminated. alloc is %s", alloc->_is_scalar_replaceable ? "SR" : "NSR");
       }
-    } else {
-      //tty->print("\t phi->in(%d) -> %s", i, ptn == nullptr ? "nullptr" : ""); if (ptn != nullptr) ptn->dump();
     }
   }
 
@@ -556,13 +550,11 @@ void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* ophi, GrowableArr
               if (new_load->is_Load()) {
                 Node* new_addp = new_load->in(MemNode::Address);
                 Node* base = get_addp_base(new_addp);
-                PointsToNode* ptn_base = ptnode_adr(base->_idx);
 
-                // The base might not be something that we can create an unique type for.
-                // If that's the case we are done with that input.
-                PointsToNode* uniq = unique_java_object(base);
-                if (ptn_base == nullptr ||
-                    !ptn_base->scalar_replaceable() || uniq == nullptr || uniq == phantom_obj) {
+                // The base might not be something that we can create an unique
+                // type for. If that's the case we are done with that input.
+                PointsToNode* jobj_ptn = unique_java_object(base);
+                if (jobj_ptn == nullptr || !jobj_ptn->scalar_replaceable()) {
                   continue;
                 }
 
@@ -572,7 +564,7 @@ void ConnectionGraph::reduce_this_phi_on_field_access(PhiNode* ophi, GrowableArr
                 // Now let's add the node to the connection graph
                 _nodes.at_grow(new_addp->_idx, nullptr);
                 add_field(new_addp, fn->escape_state(), fn->offset());
-                add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptn_base);
+                add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptnode_adr(base->_idx));
 
                 // If the load doesn't load an object then it won't be
                 // part of the connection graph
@@ -2224,9 +2216,13 @@ int ConnectionGraph::find_init_values_null(JavaObjectNode* pta, PhaseTransform* 
 
 // Adjust scalar_replaceable state after Connection Graph is built.
 void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Unique_Node_List &reducible_merges) {
-  // We record when we find that an object is part of a reducible merge so that
-  // we are able to skip some of the other constraints.
-  bool part_of_reducible_merge = false;
+  // A Phi 'x' is a _candidate_ to be reducible if 'can_reduce_this_phi(x)'
+  // returns true. If one of the constraints in this method set 'jobj' to NSR
+  // then the candidate Phi is discarded. If the Phi has another SR 'jobj' as
+  // input, 'adjust_scalar_replaceable_state' will eventually be called with
+  // that other object and the Phi will become a reducible Phi.
+  // There could be multiple merges involving the same jobj.
+  Unique_Node_List candidates;
 
   // Search for non-escaping objects which are not scalar replaceable
   // and mark them to propagate the state to referenced objects.
@@ -2269,8 +2265,7 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
         Node* use_n = use->ideal_node();
         if (ReduceAllocationMerges && use_n->is_Phi() &&
             (reducible_merges.member(use_n) || can_reduce_this_phi(use))) {
-          reducible_merges.push(use_n);
-          part_of_reducible_merge = true;
+          candidates.push(use_n);
         } else {
           // Mark all objects as NSR & NonUnique if we can't remove the merge
           set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA trace_merged_message(ptn)));
@@ -2338,7 +2333,7 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
     //    Point p[] = new Point[1];
     //    if ( x ) p[0] = new Point(); // Will be not scalar replaced
     //
-    if (field->base_count() > 1 && !part_of_reducible_merge) {
+    if (field->base_count() > 1 && candidates.size() == 0) {
       for (BaseIterator i(field); i.has_next(); i.next()) {
         PointsToNode* base = i.get();
         // Don't take into account LocalVar nodes which
@@ -2351,6 +2346,15 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
         }
       }
     }
+  }
+
+  // The candidate is truly a reducible merge only if none of the other
+  // constraints ruled it as NSR. There could be multiple merges involving the
+  // same jobj.
+  assert(jobj->scalar_replaceable(), "sanity");
+  for (uint i = 0; i < candidates.size(); i++ ) {
+    Node* candidate = candidates.at(i);
+    reducible_merges.push(candidate);
   }
 }
 
