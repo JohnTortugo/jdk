@@ -46,6 +46,7 @@ env:
 jobs:
   test:
     name: test
+    timeout-minutes: 1200
     runs-on: ${{ inputs.runs-on }}
     defaults:
       run:
@@ -144,7 +145,7 @@ jobs:
           JDK_IMAGE_DIR=${{ steps.bundles.outputs.jdk-path }}
           SYMBOLS_IMAGE_DIR=${{ steps.bundles.outputs.symbols-path }}
           TEST_IMAGE_DIR=${{ steps.bundles.outputs.tests-path }}
-          JTREG='JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash -Xcomp -XX:-TieredCompilation -server -XX:+UnlockDiagnosticVMOptions -XX:+StressLCM -XX:+StressGCM -XX:+StressCCP;VERBOSE=fail,error,time;KEYWORDS=!headful'
+          JTREG='JAVA_OPTIONS=-XX:-CreateCoredumpOnCrash -Xcomp -XX:-TieredCompilation -server -XX:+UnlockDiagnosticVMOptions -XX:+StressLCM -XX:+StressGCM -XX:+StressCCP -XX:-ReduceAllocationMerges;VERBOSE=fail,error,time;KEYWORDS=!headful'
           && bash ./.github/scripts/gen-test-summary.sh "$GITHUB_STEP_SUMMARY" "$GITHUB_OUTPUT"
         env:
           PATH: ${{ steps.path.outputs.value }}
