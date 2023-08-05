@@ -484,6 +484,7 @@ public:
   // Node::Value, Node::Identity, hash-based value numbering, Node::Ideal_DU
   // and dominator info to a fixed point.
   void optimize();
+  void cesar_optimize();
 #ifdef ASSERT
   void verify_optimize();
   bool verify_node_value(Node* n);
@@ -491,6 +492,7 @@ public:
 
 #ifndef PRODUCT
   void trace_PhaseIterGVN(Node* n, Node* nn, const Type* old_type);
+  void trace_PhaseIterGVN_cesar(Node* n, Node* nn, const Type* old_type, stringStream* ss);
   void init_verifyPhaseIterGVN();
   void verify_PhaseIterGVN();
 #endif
@@ -498,6 +500,7 @@ public:
 #ifdef ASSERT
   void dump_infinite_loop_info(Node* n, const char* where);
   void trace_PhaseIterGVN_verbose(Node* n, int num_processed);
+  void trace_PhaseIterGVN_verbose_cesar(Node* n, int num_processed, stringStream* ss);
 #endif
 
   // Register a new node with the iter GVN pass without transforming it.

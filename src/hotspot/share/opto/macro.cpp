@@ -59,6 +59,34 @@
 #include "gc/g1/g1ThreadLocalData.hpp"
 #endif // INCLUDE_G1GC
 
+static void save_graph(Compile* comp) {
+  static int counter = 1;
+
+  stringStream ss;
+  ss.print("/tmp/graph_emn_progress__%d.ir", counter);
+  Unique_Node_List ideal_nodes;
+  fileStream fstream(ss.as_string());
+
+  ideal_nodes.push(comp->root());
+  for( uint next = 0; next < ideal_nodes.size(); ++next ) {
+    Node* n = ideal_nodes.at(next);
+
+    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
+    fstream.cr();
+
+    for (uint i=0; i<n->outcnt(); i++) {
+      Node* m = n->raw_out(i);
+      ideal_nodes.push(m);
+    }
+  }
+
+  fstream.flush();
+
+  tty->print_cr("----------------------------------------");
+  tty->print_cr("Graph dumped to: %s", ss.as_string());
+
+  Atomic::inc(&counter);
+}
 
 //
 // Replace any references to "oldref" in inputs to "use" with "newref".
@@ -890,6 +918,211 @@ static void disconnect_projections(MultiNode* n, PhaseIterGVN& igvn) {
   }
 }
 
+void PhaseMacroExpand::process_users_of_allocation_cesar(CallNode *alloc) {
+  Node* res = alloc->result_cast();
+
+  if (alloc->_idx == 355) {
+    alloc->dump(-3);
+    if (res == nullptr) tty->print_cr("RES was nullptr");
+  }
+
+  if (res != nullptr) {
+    for (DUIterator_Last jmin, j = res->last_outs(jmin); j >= jmin; ) {
+      Node *use = res->last_out(j);
+      uint oc1 = res->outcnt();
+
+      if (use->is_AddP()) {
+        for (DUIterator_Last kmin, k = use->last_outs(kmin); k >= kmin; ) {
+          Node *n = use->last_out(k);
+          uint oc2 = use->outcnt();
+          if (n->is_Store()) {
+            _igvn.replace_node(n, n->in(MemNode::Memory));
+          } else {
+            eliminate_gc_barrier(n);
+          }
+          k -= (oc2 - use->outcnt());
+        }
+        _igvn.remove_dead_node(use);
+      } else if (use->is_ArrayCopy()) {
+        // Disconnect ArrayCopy node
+        ArrayCopyNode* ac = use->as_ArrayCopy();
+        if (ac->is_clonebasic()) {
+          Node* membar_after = ac->proj_out(TypeFunc::Control)->unique_ctrl_out();
+          disconnect_projections(ac, _igvn);
+          Node* membar_before = alloc->in(TypeFunc::Memory)->in(0);
+          disconnect_projections(membar_before->as_MemBar(), _igvn);
+          if (membar_after->is_MemBar()) {
+            disconnect_projections(membar_after->as_MemBar(), _igvn);
+          }
+        } else {
+          CallProjections callprojs;
+          ac->extract_projections(&callprojs, true);
+
+          _igvn.replace_node(callprojs.fallthrough_ioproj, ac->in(TypeFunc::I_O));
+          _igvn.replace_node(callprojs.fallthrough_memproj, ac->in(TypeFunc::Memory));
+          _igvn.replace_node(callprojs.fallthrough_catchproj, ac->in(TypeFunc::Control));
+
+          // Set control to top. IGVN will remove the remaining projections
+          ac->set_req(0, top());
+          ac->replace_edge(res, top(), &_igvn);
+
+          // Disconnect src right away: it can help find new
+          // opportunities for allocation elimination
+          Node* src = ac->in(ArrayCopyNode::Src);
+          ac->replace_edge(src, top(), &_igvn);
+          // src can be top at this point if src and dest of the
+          // arraycopy were the same
+          if (src->outcnt() == 0 && !src->is_top()) {
+            _igvn.remove_dead_node(src);
+          }
+        }
+        _igvn._worklist.push(ac);
+      } else {
+        eliminate_gc_barrier(use);
+      }
+      j -= (oc1 - res->outcnt());
+    }
+    _igvn.remove_dead_node(res);
+  }
+
+  save_graph(C);
+  tty->print("Checking midway through process_users_of_allocation of allocate node %d .... ", alloc->_idx);
+  PhaseIdealLoop::verify(_igvn);
+  tty->print_cr("passed.");
+
+
+  if (alloc->_idx == 355) {
+    tty->print_cr("is _callprojs.resproj               -> %d",   _callprojs.resproj == nullptr ? -1 : _callprojs.resproj->_idx);
+    _callprojs.resproj->dump();
+    tty->print_cr("is _callprojs.fallthrough_catchproj -> %d",   _callprojs.fallthrough_catchproj == nullptr ? -1 : _callprojs.fallthrough_catchproj->_idx);
+    _callprojs.fallthrough_catchproj->dump();
+    tty->print_cr("is _callprojs.fallthrough_memproj   -> %d",   _callprojs.fallthrough_memproj == nullptr   ? -1 : _callprojs.fallthrough_memproj->_idx);
+    _callprojs.fallthrough_memproj->dump();
+    tty->print_cr("is _callprojs.catchall_memproj      -> %d",   _callprojs.catchall_memproj == nullptr      ? -1 : _callprojs.catchall_memproj->_idx);
+    _callprojs.catchall_memproj->dump();
+    tty->print_cr("is _callprojs.fallthrough_ioproj    -> %d",   _callprojs.fallthrough_ioproj == nullptr    ? -1 : _callprojs.fallthrough_ioproj->_idx);
+    _callprojs.fallthrough_ioproj->dump();
+    tty->print_cr("is _callprojs.catchall_ioproj       -> %d",   _callprojs.catchall_ioproj == nullptr       ? -1 : _callprojs.catchall_ioproj->_idx);
+    _callprojs.catchall_ioproj->dump();
+    tty->print_cr("is _callprojs.catchall_catchproj    -> %d",   _callprojs.catchall_catchproj == nullptr    ? -1 : _callprojs.catchall_catchproj->_idx);
+    _callprojs.catchall_catchproj->dump();
+  }
+
+  //
+  // Process other users of allocation's projections
+  //
+  if (_callprojs.resproj != nullptr && _callprojs.resproj->outcnt() != 0) {
+    // First disconnect stores captured by Initialize node.
+    // If Initialize node is eliminated first in the following code,
+    // it will kill such stores and DUIterator_Last will assert.
+    for (DUIterator_Fast jmax, j = _callprojs.resproj->fast_outs(jmax);  j < jmax; j++) {
+      Node* use = _callprojs.resproj->fast_out(j);
+      if (use->is_AddP()) {
+        // raw memory addresses used only by the initialization
+        _igvn.replace_node(use, C->top());
+        --j; --jmax;
+      }
+    }
+
+  save_graph(C);
+  tty->print("Checking after process_users_of_allocation resproj after dealing with AddPs of allocate node %d .... ", alloc->_idx);
+  PhaseIdealLoop::verify(_igvn);
+  tty->print_cr("passed.");
+
+
+    for (DUIterator_Last jmin, j = _callprojs.resproj->last_outs(jmin); j >= jmin; ) {
+      Node* use = _callprojs.resproj->last_out(j);
+      uint oc1 = _callprojs.resproj->outcnt();
+      if (use->is_Initialize()) {
+        // Eliminate Initialize node.
+        InitializeNode *init = use->as_Initialize();
+        Node *ctrl_proj = init->proj_out_or_null(TypeFunc::Control);
+        if (ctrl_proj != nullptr) {
+          _igvn.replace_node(ctrl_proj, init->in(TypeFunc::Control));
+        }
+        Node *mem_proj = init->proj_out_or_null(TypeFunc::Memory);
+        if (mem_proj != nullptr) {
+          Node *mem = init->in(TypeFunc::Memory);
+          _igvn.replace_node(mem_proj, mem);
+        }
+      }
+      j -= (oc1 - _callprojs.resproj->outcnt());
+    }
+  }
+
+
+
+
+
+
+
+
+
+
+  save_graph(C);
+  tty->print("Checking after process_users_of_allocation resproj of allocate node %d .... ", alloc->_idx);
+  PhaseIdealLoop::verify(_igvn);
+  tty->print_cr("passed.");
+
+  if (_callprojs.fallthrough_catchproj != nullptr) {
+    _igvn.replace_node(_callprojs.fallthrough_catchproj, alloc->in(TypeFunc::Control));
+  }
+
+
+
+
+
+
+//  save_graph(C);
+//  tty->print("Checking after process_users_of_allocation fallthrough_catchproj of allocate node %d .... ", alloc->_idx);
+//  PhaseIdealLoop::verify(_igvn);
+//  tty->print_cr("passed.");
+
+  if (_callprojs.fallthrough_memproj != nullptr) {
+    _igvn.replace_node(_callprojs.fallthrough_memproj, alloc->in(TypeFunc::Memory));
+  }
+
+
+
+
+
+
+
+
+//  save_graph(C);
+//  tty->print("Checking after process_users_of_allocation fallthrough_memproj of allocate node %d .... ", alloc->_idx);
+//  PhaseIdealLoop::verify(_igvn);
+//  tty->print_cr("passed.");
+//
+//  if (_callprojs.catchall_memproj != nullptr) {
+//    _igvn.replace_node(_callprojs.catchall_memproj, C->top());
+//  }
+
+
+
+
+
+
+
+
+
+
+//  save_graph(C);
+//  tty->print("Checking after process_users_of_allocation catchall_memproj of allocate node %d .... ", alloc->_idx);
+//  PhaseIdealLoop::verify(_igvn);
+//  tty->print_cr("passed.");
+
+  if (_callprojs.fallthrough_ioproj != nullptr) {
+    _igvn.replace_node(_callprojs.fallthrough_ioproj, alloc->in(TypeFunc::I_O));
+  }
+  if (_callprojs.catchall_ioproj != nullptr) {
+    _igvn.replace_node(_callprojs.catchall_ioproj, C->top());
+  }
+  if (_callprojs.catchall_catchproj != nullptr) {
+    _igvn.replace_node(_callprojs.catchall_catchproj, C->top());
+  }
+}
+
 // Process users of eliminated allocation.
 void PhaseMacroExpand::process_users_of_allocation(CallNode *alloc) {
   Node* res = alloc->result_cast();
@@ -1038,7 +1271,74 @@ void PhaseMacroExpand::process_users_of_allocation(CallNode *alloc) {
   }
 }
 
+bool PhaseMacroExpand::eliminate_allocate_node_cesar(AllocateNode *alloc) {
+  // If reallocation fails during deoptimization we'll pop all
+  // interpreter frames for this compiled frame and that won't play
+  // nice with JVMTI popframe.
+  // We avoid this issue by eager reallocation when the popframe request
+  // is received.
+  if (!EliminateAllocations || !alloc->_is_non_escaping) {
+    return false;
+  }
+  Node* klass = alloc->in(AllocateNode::KlassNode);
+  const TypeKlassPtr* tklass = _igvn.type(klass)->is_klassptr();
+  Node* res = alloc->result_cast();
+  // Eliminate boxing allocations which are not used
+  // regardless scalar replaceable status.
+  bool boxing_alloc = C->eliminate_boxing() &&
+                      tklass->isa_instklassptr() &&
+                      tklass->is_instklassptr()->instance_klass()->is_box_klass();
+  if (!alloc->_is_scalar_replaceable && (!boxing_alloc || (res != nullptr))) {
+    return false;
+  }
+
+  alloc->extract_projections(&_callprojs, false /*separate_io_proj*/, false /*do_asserts*/);
+
+  GrowableArray <SafePointNode *> safepoints;
+  if (!can_eliminate_allocation(&_igvn, alloc, &safepoints)) {
+    return false;
+  }
+
+  if (!alloc->_is_scalar_replaceable) {
+    assert(res == nullptr, "sanity");
+    // We can only eliminate allocation if all debug info references
+    // are already replaced with SafePointScalarObject because
+    // we can't search for a fields value without instance_id.
+    if (safepoints.length() > 0) {
+      return false;
+    }
+  }
+
+  save_graph(C);
+  tty->print("Checking before scalar_replacement of allocate node %d .... ", alloc->_idx);
+  PhaseIdealLoop::verify(_igvn);
+  tty->print_cr("passed.");
+
+  if (!scalar_replacement(alloc, safepoints)) {
+    return false;
+  }
+
+  save_graph(C);
+  tty->print("Checking before process_users_of_allocation of allocate node %d .... ", alloc->_idx);
+  PhaseIdealLoop::verify(_igvn);
+  tty->print_cr("passed.");
+
+  process_users_of_allocation_cesar(alloc);
+
+  save_graph(C);
+  tty->print("Checking AFTER process_users_of_allocation of allocate node %d .... ", alloc->_idx);
+  //PhaseIdealLoop::verify(_igvn);
+  tty->print_cr("passed.");
+
+
+  return true;
+}
+
 bool PhaseMacroExpand::eliminate_allocate_node(AllocateNode *alloc) {
+  if (alloc->_idx == 355 || alloc->_idx == 179) {
+    tty->print_cr("Found the allocs.");
+  }
+
   // If reallocation fails during deoptimization we'll pop all
   // interpreter frames for this compiled frame and that won't play
   // nice with JVMTI popframe.
@@ -2323,6 +2623,96 @@ void PhaseMacroExpand::expand_subtypecheck_node(SubTypeCheckNode *check) {
     _igvn.replace_node(iffalse, ctrl);
   }
   _igvn.replace_node(check, C->top());
+}
+
+void PhaseMacroExpand::eliminate_macro_nodes_cesar() {
+  if (C->macro_count() == 0)
+    return;
+
+  // Before elimination may re-mark (change to Nested or NonEscObj)
+  // all associated (same box and obj) lock and unlock nodes.
+  int cnt = C->macro_count();
+  for (int i=0; i < cnt; i++) {
+    Node *n = C->macro_node(i);
+    if (n->is_AbstractLock()) { // Lock and Unlock nodes
+      mark_eliminated_locking_nodes(n->as_AbstractLock());
+    }
+  }
+  // Re-marking may break consistency of Coarsened locks.
+  if (!C->coarsened_locks_consistent()) {
+    return; // recompile without Coarsened locks if broken
+  }
+
+  // First, attempt to eliminate locks
+  bool progress = true;
+  while (progress) {
+    progress = false;
+    for (int i = C->macro_count(); i > 0; i = MIN2(i - 1, C->macro_count())) { // more than 1 element can be eliminated at once
+      Node* n = C->macro_node(i - 1);
+      bool success = false;
+      DEBUG_ONLY(int old_macro_count = C->macro_count();)
+      if (n->is_AbstractLock()) {
+        success = eliminate_locking_node(n->as_AbstractLock());
+      }
+      assert(success == (C->macro_count() < old_macro_count), "elimination reduces macro count");
+      progress = progress || success;
+    }
+  }
+
+  tty->print("Checking before emn loop.... ");
+  PhaseIdealLoop::verify(_igvn);
+  tty->print_cr("passed.");
+
+  // Next, attempt to eliminate allocations
+  _has_locks = false;
+  progress = true;
+  while (progress) {
+    progress = false;
+    for (int i = C->macro_count(); i > 0; i = MIN2(i - 1, C->macro_count())) { // more than 1 element can be eliminated at once
+      Node* n = C->macro_node(i - 1);
+      bool success = false;
+      DEBUG_ONLY(int old_macro_count = C->macro_count();)
+      switch (n->class_id()) {
+      case Node::Class_Allocate:
+      case Node::Class_AllocateArray:
+      {
+        int id = n->_idx;
+        success = eliminate_allocate_node_cesar(n->as_Allocate());
+        save_graph(C);
+        tty->print("Checking After eliminating allocate node %d .... ", id);
+        //PhaseIdealLoop::verify(_igvn);
+        tty->print_cr("passed.");
+        break;
+      }
+      case Node::Class_CallStaticJava:
+        success = eliminate_boxing_node(n->as_CallStaticJava());
+        break;
+      case Node::Class_Lock:
+      case Node::Class_Unlock:
+        assert(!n->as_AbstractLock()->is_eliminated(), "sanity");
+        _has_locks = true;
+        break;
+      case Node::Class_ArrayCopy:
+        break;
+      case Node::Class_OuterStripMinedLoop:
+        break;
+      case Node::Class_SubTypeCheck:
+        break;
+      case Node::Class_Opaque1:
+        break;
+      default:
+        assert(n->Opcode() == Op_LoopLimit ||
+               n->Opcode() == Op_Opaque3   ||
+               n->Opcode() == Op_Opaque4   ||
+               n->Opcode() == Op_MaxL      ||
+               n->Opcode() == Op_MinL      ||
+               BarrierSet::barrier_set()->barrier_set_c2()->is_gc_barrier_node(n),
+               "unknown node type in macro list");
+      }
+      assert(success == (C->macro_count() < old_macro_count), "elimination reduces macro count");
+      progress = progress || success;
+    }
+  }
 }
 
 //---------------------------eliminate_macro_nodes----------------------

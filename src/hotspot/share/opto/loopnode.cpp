@@ -48,6 +48,28 @@
 #include "runtime/sharedRuntime.hpp"
 #include "utilities/powerOfTwo.hpp"
 
+#ifndef PRODUCT
+static void save_graph(Node* root, const char* filepath) {
+  Unique_Node_List ideal_nodes;
+  fileStream fstream(filepath);
+
+  ideal_nodes.push(root);
+  for( uint next = 0; next < ideal_nodes.size(); ++next ) {
+    Node* n = ideal_nodes.at(next);
+
+    n->dump(nullptr, false, &fstream);
+    fstream.cr();
+
+    for (uint i=0; i<n->outcnt(); i++) {
+      Node* m = n->raw_out(i);
+      ideal_nodes.push(m);
+    }
+  }
+
+  fstream.flush();
+}
+#endif
+
 //=============================================================================
 //--------------------------is_cloop_ind_var-----------------------------------
 // Determine if a node is a counted loop induction variable.
@@ -4240,7 +4262,7 @@ bool PhaseIdealLoop::only_has_infinite_loops() {
 // Create a PhaseLoop.  Build the ideal Loop tree.  Map each Ideal Node to
 // its corresponding LoopNode.  If 'optimize' is true, do some loop cleanups.
 void PhaseIdealLoop::build_and_optimize() {
-  assert(!C->post_loop_opts_phase(), "no loop opts allowed");
+  assert(_verify_only || !C->post_loop_opts_phase(), "no loop opts allowed");
 
   bool do_split_ifs = (_mode == LoopOptsDefault);
   bool skip_loop_opts = (_mode == LoopOptsNone);
@@ -5484,6 +5506,10 @@ void PhaseIdealLoop::build_loop_early( VectorSet &visited, Node_List &worklist, 
           set_ctrl(in, in->in(0));
         int is_visited = visited.test_set( in->_idx );
         if (!has_node(in)) {  // No controlling input yet?
+          if (in->is_CFG()) {
+            tty->print_cr("Offending node (n): ");        n->dump(3);  n->dump(-3);
+            tty->print_cr("Offending node (n->in()): "); in->dump(3); in->dump(-3);
+          }
           assert( !in->is_CFG(), "CFG Node with no controlling input?" );
           assert( !is_visited, "visit only once" );
           nstack.push(n, i);  // Save parent node and next input's index.
@@ -5587,6 +5613,12 @@ bool PhaseIdealLoop::verify_dominance(Node* n, Node* use, Node* LCA, Node* early
     Node* d = LCA;
     while (d != early) {
       if (d == C->root()) {
+
+        tty->print_cr("bad graph. bad graph. Method and holder -> %s::%s", C->method()->holder()->name()->as_utf8(), C->method()->name()->as_utf8());
+        stringStream ss;
+        ss.print("/tmp/error_%s.txt", C->method()->name()->as_utf8());
+        save_graph(C->root(), ss.as_string());
+
         dump_bad_graph("Bad graph detected in compute_lca_of_uses", n, early, LCA);
         tty->print_cr("*** Use %d isn't dominated by def %d ***", use->_idx, n->_idx);
         had_error = true;
@@ -5956,27 +5988,7 @@ void PhaseIdealLoop::verify_strip_mined_scheduling(Node *n, Node* least) {
 #endif
 }
 
-#ifndef PRODUCT
-static void save_graph(Node* root, const char* filepath) {
-  Unique_Node_List ideal_nodes;
-  fileStream fstream(filepath);
 
-  ideal_nodes.push(root);
-  for( uint next = 0; next < ideal_nodes.size(); ++next ) {
-    Node* n = ideal_nodes.at(next);
-
-    n->dump(nullptr, false, &fstream);
-    fstream.cr();
-
-    for (uint i=0; i<n->outcnt(); i++) {
-      Node* m = n->raw_out(i);
-      ideal_nodes.push(m);
-    }
-  }
-
-  fstream.flush();
-}
-#endif
 
 //------------------------------build_loop_late_post---------------------------
 // Put Data nodes into some loop nest, by setting the _nodes[]->loop mapping.

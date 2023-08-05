@@ -51,26 +51,16 @@ public class FragmentMetaspace {
     }
 
     private static void runGrowing(long time, int iterations) {
-        long startTime = System.currentTimeMillis();
-        for (int i = 0; System.currentTimeMillis() < startTime + time && i < iterations; ++i) {
+        for (int i = 0; i < iterations; ++i) {
             try {
                 GeneratingCompilingClassLoader gcl = new GeneratingCompilingClassLoader();
 
-                // getGeneratedClasses throws a RuntimeException in cases where
-                // the javac exit code is not 0. If the original reason for the exception is
-                // a "java.lang.OutOfMemoryError: Java heap space",
-                // increase the heap size in the @run tag and rerun the test.
-                // The heap can be exhausted by this test, but heap exhaustion
-                // is not a failure mode of this test and should be ignored.
                 c = gcl.getGeneratedClasses(i, 100)[0];
                 c.newInstance();
                 c = null;
 
                 gcl = null;
             } catch (IOException | InstantiationException | IllegalAccessException ex) {
-                throw new RuntimeException(ex);
-            } catch (OutOfMemoryError oome) {
-                System.out.println("javac failed with OOM; ignored.");
                 return;
             }
         }

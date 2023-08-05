@@ -97,9 +97,11 @@ private:
 
   bool eliminate_boxing_node(CallStaticJavaNode *boxing);
   bool eliminate_allocate_node(AllocateNode *alloc);
+  bool eliminate_allocate_node_cesar(AllocateNode *alloc);
   void undo_previous_scalarizations(GrowableArray <SafePointNode *> safepoints_done, AllocateNode* alloc);
   bool scalar_replacement(AllocateNode *alloc, GrowableArray <SafePointNode *>& safepoints);
   void process_users_of_allocation(CallNode *alloc);
+  void process_users_of_allocation_cesar(CallNode *alloc);
 
   void eliminate_gc_barrier(Node *p2x);
   void mark_eliminated_box(Node* box, Node* obj);
@@ -201,6 +203,7 @@ public:
     _igvn.set_delay_transform(true);
   }
   void eliminate_macro_nodes();
+  void eliminate_macro_nodes_cesar();
   bool expand_macro_nodes();
 
   SafePointScalarObjectNode* create_scalarized_object_description(AllocateNode *alloc, SafePointNode* sfpt);

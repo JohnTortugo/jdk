@@ -1065,48 +1065,88 @@ void PhaseIterGVN::verify_step(Node* n) {
 
 void PhaseIterGVN::trace_PhaseIterGVN(Node* n, Node* nn, const Type* oldtype) {
   if (TraceIterativeGVN) {
+    stringStream ss;
     uint wlsize = _worklist.size();
     const Type* newtype = type_or_null(n);
+
+    if (n == nn && oldtype == newtype);
+
+    ss.print("Old Node: "); n->dump("\n", false, &ss);
     if (nn != n) {
-      // print old node
-      tty->print("< ");
-      if (oldtype != newtype && oldtype != nullptr) {
-        oldtype->dump();
-      }
-      do { tty->print("\t"); } while (tty->position() < 16);
-      tty->print("<");
-      n->dump();
+      ss.print("New Node: "); nn->dump("\n", false, &ss);
+    } else {
+      ss.print_cr("New Node: same.");;
     }
-    if (oldtype != newtype || nn != n) {
-      // print new node and/or new type
-      if (oldtype == nullptr) {
-        tty->print("* ");
-      } else if (nn != n) {
-        tty->print("> ");
+
+    ss.print("Old type: ");
+    if (oldtype != nullptr) {
+      oldtype->dump_on(&ss); ss.cr();
+    } else {
+      ss.print_cr("nullptr");
+    }
+    if (oldtype != newtype) {
+      ss.print("New type: ");
+      if (newtype != nullptr) {
+        newtype->dump_on(&ss); ss.cr();
       } else {
-        tty->print("= ");
+        ss.print_cr("nullptr");
       }
-      if (newtype == nullptr) {
-        tty->print("null");
-      } else {
-        newtype->dump();
-      }
-      do { tty->print("\t"); } while (tty->position() < 16);
-      nn->dump();
+    } else {
+      ss.print_cr("New type: same.");
     }
-    if (Verbose && wlsize < _worklist.size()) {
-      tty->print("  Push {");
-      while (wlsize != _worklist.size()) {
-        Node* pushed = _worklist.at(wlsize++);
-        tty->print(" %d", pushed->_idx);
-      }
-      tty->print_cr(" }");
-    }
-    if (nn != n) {
-      // ignore n, it might be subsumed
-      verify_step((Node*) nullptr);
+
+    ttyLocker ttyl;
+    tty->print_cr("%s----------------------------------------", ss.as_string());
+  }
+}
+
+static void save_graph(Compile* comp, stringStream* debug) {
+  static int counter = 1;
+
+  stringStream ss;
+  ss.print("/tmp/graph_badbug_progress__%d.ir", counter);
+  Unique_Node_List ideal_nodes;
+  fileStream fstream(ss.as_string());
+
+  ideal_nodes.push(comp->root());
+  for( uint next = 0; next < ideal_nodes.size(); ++next ) {
+    Node* n = ideal_nodes.at(next);
+
+    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
+    fstream.cr();
+
+    for (uint i=0; i<n->outcnt(); i++) {
+      Node* m = n->raw_out(i);
+      ideal_nodes.push(m);
     }
   }
+
+  fstream.flush();
+
+  debug->print_cr("Graph dumped to: %s", ss.as_string());
+
+  Atomic::inc(&counter);
+}
+
+void PhaseIterGVN::trace_PhaseIterGVN_cesar(Node* n, Node* nn, const Type* oldtype, stringStream* ss) {
+    uint wlsize = _worklist.size();
+    const Type* newtype = type_or_null(n);
+
+    if (n == nn && oldtype == newtype) return;
+
+    ss->print("New Node: "); nn->dump("\n", false, ss);
+
+    ss->print("New type: ");
+    if (newtype != nullptr) {
+      newtype->dump_on(ss); ss->cr();
+    } else {
+      ss->print_cr("nullptr");
+    }
+
+    ttyLocker ttyl;
+    save_graph(C, ss);
+    //PhaseIdealLoop::verify(*this);
+    //tty->print_cr("%s----------------------------------------", ss->as_string());
 }
 
 void PhaseIterGVN::init_verifyPhaseIterGVN() {
@@ -1181,13 +1221,20 @@ void PhaseIterGVN::dump_infinite_loop_info(Node* n, const char* where) {
  * Prints out information about IGVN if the 'verbose' option is used.
  */
 void PhaseIterGVN::trace_PhaseIterGVN_verbose(Node* n, int num_processed) {
-  if (TraceIterativeGVN && Verbose) {
-    tty->print("  Pop ");
+  if (TraceIterativeGVN) {
     n->dump();
-    if ((num_processed % 100) == 0) {
-      _worklist.print_set();
-    }
   }
+}
+
+void PhaseIterGVN::trace_PhaseIterGVN_verbose_cesar(Node* n, int num_processed, stringStream* ss) {
+    ss->print("Old Node: "); n->dump("\n", false, ss);
+    const Type* oldtype = type_or_null(n);
+    ss->print("Old type: ");
+    if (oldtype != nullptr) {
+      oldtype->dump_on(ss); ss->cr();
+    } else {
+      ss->print_cr("nullptr");
+    }
 }
 #endif /* ASSERT */
 
@@ -1223,6 +1270,24 @@ void PhaseIterGVN::optimize() {
     loop_count++;
   }
   NOT_PRODUCT(verify_PhaseIterGVN();)
+}
+
+void PhaseIterGVN::cesar_optimize() {
+  init_verifyPhaseIterGVN();
+
+  while(_worklist.size()) {
+    Node* n  = _worklist.pop();
+    stringStream ss;
+    trace_PhaseIterGVN_verbose_cesar(n, 1, &ss);
+    if (n->outcnt() != 0) {
+      const Type* oldtype = type_or_null(n);
+      Node* nn = transform_old(n);
+      trace_PhaseIterGVN_cesar(n, nn, oldtype, &ss);
+    } else if (!n->is_top()) {
+      remove_dead_node(n);
+    }
+  }
+  verify_PhaseIterGVN();
 }
 
 #ifdef ASSERT

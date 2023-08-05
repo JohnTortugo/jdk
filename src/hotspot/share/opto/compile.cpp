@@ -92,49 +92,16 @@ MachConstantBaseNode* Compile::mach_constant_base_node() {
   return _mach_constant_base_node;
 }
 
-/*
-static void save_graph_if(Compile* comp, const char* holder, const char* method, const char* filepath, const int counter=0) {
-#ifndef PRODUCT
-  if (strcmp(comp->method()->holder()->name()->as_utf8(), holder) != 0) return ;
-
-  stringStream ss;
-  ss.print("%s___%d.ir", filepath, counter);
-
-  Unique_Node_List ideal_nodes;
-  fileStream fstream(ss.as_string());
-
-  ideal_nodes.push(comp->root());
-  for( uint next = 0; next < ideal_nodes.size(); ++next ) {
-    Node* n = ideal_nodes.at(next);
-
-    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
-    fstream.cr();
-
-    for (uint i=0; i<n->outcnt(); i++) {
-      Node* m = n->raw_out(i);
-      ideal_nodes.push(m);
-    }
-  }
-
-  fstream.flush();
-#endif
-}
-*/
-
 static void save_graph(Compile* comp, const char* label) {
   ttyLocker ttyl;
   static int counter = 1;
 
-  if (comp == nullptr || comp->method() == nullptr || comp->method()->holder() == nullptr) return ;
+  if (comp == nullptr || comp->method() == nullptr) return ;
 
-  const char* holder = comp->method()->holder()->name()->as_utf8();
   const char* method = comp->method()->name()->as_utf8();
 
-  if (strstr(holder, "LockStep") == nullptr) return ;
-  if (strcmp(method, "checkNavigableSet") != 0 ) return ;
-
   stringStream ss;
-  ss.print("/tmp/graph_ea_%s_%s___%d.ir", method, label, counter);
+  ss.print("/tmp/graph_badbug_%s_%s___%d.ir", method, label, counter);
   Unique_Node_List ideal_nodes;
   fileStream fstream(ss.as_string());
 
@@ -153,7 +120,7 @@ static void save_graph(Compile* comp, const char* label) {
 
   fstream.flush();
 
-  counter++;
+  Atomic::inc(&counter);
 }
 
 
@@ -2371,41 +2338,65 @@ void Compile::Optimize() {
     }
     bool progress;
     do {
-      save_graph(this, "before_do_analysis");
-      print_method(PHASE_PHASEIDEAL_BEFORE_EA, 2);
       ConnectionGraph::do_analysis(this, &igvn);
-
-      save_graph(this, "after_do_analysis");
 
       if (failing())  return;
 
       int mcount = macro_count(); // Record number of allocations and locks before IGVN
 
+      if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
+        tty->print("Check_after_do_analysis %d ... %s::%s ...", counter, method()->holder()->name()->as_utf8(), method()->name()->as_utf8());
+        save_graph(this, "after_do_analysis");
+        PhaseIdealLoop::verify(igvn);
+        tty->print_cr("passed.");
+      }
+
       // Optimize out fields loads from scalar replaceable allocations.
-      igvn.optimize();
-      //save_graph(this, "after_first_optimize");
-      print_method(PHASE_ITER_GVN_AFTER_EA, 2);
+      if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
+        igvn.cesar_optimize();
+      } else {
+        igvn.optimize();
+      }
 
       if (failing())  return;
+
+      if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
+        tty->print("Check_1st_optimize %d ... %s::%s ...", counter, method()->holder()->name()->as_utf8(), method()->name()->as_utf8());
+        save_graph(this, "after_1st_optimize");
+        PhaseIdealLoop::verify(igvn);
+        tty->print_cr("passed.");
+      }
 
       if (congraph() != nullptr && macro_count() > 0) {
         TracePhase tp("macroEliminate", &timers[_t_macroEliminate]);
         PhaseMacroExpand mexp(igvn);
-        mexp.eliminate_macro_nodes();
-        //save_graph(this, "after_eliminate");
+
+
+//        if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
+//          mexp.eliminate_macro_nodes_cesar();
+//          tty->print("Check_after_emn %d ... %s::%s ...", counter, method()->holder()->name()->as_utf8(), method()->name()->as_utf8());
+//          save_graph(this, "after_emn");
+//          //PhaseIdealLoop::verify(igvn);
+//          tty->print_cr("passed.");
+//        } else {
+          mexp.eliminate_macro_nodes();
+//        }
         igvn.set_delay_transform(false);
 
         igvn.optimize();
-        //save_graph(this, "after_second_optimize");
-        print_method(PHASE_ITER_GVN_AFTER_ELIMINATION, 2);
 
         if (failing())  return;
       }
-      progress = do_iterative_escape_analysis() &&
-                 (macro_count() < mcount) &&
-                 ConnectionGraph::has_candidates(this);
-      // Try again if candidates exist and made progress
-      // by removing some allocations and/or locks.
+      progress = do_iterative_escape_analysis() && (macro_count() < mcount) && ConnectionGraph::has_candidates(this);
+
+      if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
+        tty->print("Check_2nd_optimize %d ... %s::%s ...", counter, method()->holder()->name()->as_utf8(), method()->name()->as_utf8());
+        save_graph(this, "after_2nd_optimize");
+        PhaseIdealLoop::verify(igvn);
+        tty->print_cr("passed.");
+      }
+      counter++;
+
     } while (progress);
   }
 

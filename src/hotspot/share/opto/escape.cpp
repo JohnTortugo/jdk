@@ -80,7 +80,7 @@
 //   counter++;
 // }
 
-static void save_phi_region(Compile* comp, Node* ophi, const char* label) {
+static void save_phi_region(Compile* comp, int invocation, Node* ophi, const char* label) {
   ttyLocker ttyl;
   static int counter = 1;
 
@@ -89,7 +89,7 @@ static void save_phi_region(Compile* comp, Node* ophi, const char* label) {
   const char* method = comp->method()->name()->as_utf8();
 
   stringStream ss;
-  ss.print("/tmp/phi_region_%s_%d_%s___%d.ir", method, ophi->_idx, label, counter);
+  ss.print("/tmp/phi_region_%s_invocation_%d_%d_%s___%d.ir", method, invocation, ophi->_idx, label, counter);
   fileStream fstream(ss.as_string());
 
   ophi->dump(nullptr, false, &fstream); fstream.cr();
@@ -122,24 +122,24 @@ static void save_phi_region(Compile* comp, Node* ophi, const char* label) {
         if (!x) continue;
         x->dump(nullptr, false, &fstream); fstream.cr();
 
-        for (uint l=0; l<x->outcnt(); l++) {
-          Node* y = x->raw_out(l);
-          if (!y) continue;
-          y->dump(nullptr, false, &fstream); fstream.cr();
+        //for (uint l=0; l<x->outcnt(); l++) {
+        //  Node* y = x->raw_out(l);
+        //  if (!y) continue;
+        //  y->dump(nullptr, false, &fstream); fstream.cr();
 
-          for (uint q=0; q<y->outcnt(); q++) {
-            Node* z = y->raw_out(q);
-            if (!z) continue;
-            z->dump(nullptr, false, &fstream); fstream.cr();
-          }
-        }
+        //  for (uint q=0; q<y->outcnt(); q++) {
+        //    Node* z = y->raw_out(q);
+        //    if (!z) continue;
+        //    z->dump(nullptr, false, &fstream); fstream.cr();
+        //  }
+        //}
       }
     }
   }
 
   fstream.flush();
 
-  counter++;
+  Atomic::inc(&counter);
 }
 #endif
 
@@ -505,7 +505,7 @@ bool ConnectionGraph::compute_escape() {
     for (uint i = 0; i < reducible_merges.size(); i++ ) {
       Node* n = reducible_merges.at(i);
 
-      save_phi_region(_compile, n, "before_reduce_safepoints");
+      save_phi_region(_compile, _invocation, n, "before_reduce_safepoints");
 
       if (n->outcnt() > 0) {
         if (!reduce_on_safepoints(n->as_Phi())) {
@@ -518,7 +518,9 @@ bool ConnectionGraph::compute_escape() {
         reset_merge_entries(n->as_Phi());
       }
 
-      save_phi_region(_compile, n, "after_reduce_safepoints");
+      save_phi_region(_compile, _invocation, n, "after_reduce_safepoints");
+
+      PhaseIdealLoop::verify(*_igvn);
     }
     _igvn->set_delay_transform(delay);
   }
@@ -713,8 +715,14 @@ bool ConnectionGraph::can_reduce(PhiNode* ophi) const {
     return false;
   }
 
+  bool can_reduce = true;
+
+  if (strcmp(_compile->method()->name()->as_utf8(), "walkFileTree") == 0) {
+     tty->print_cr("found");
+  }
+
   NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("%s) Can reduce Phi %d during invocation %d: ", _compile->method()->name()->as_utf8(), ophi->_idx, _invocation); })
-  return true;
+  return can_reduce;
 }
 
 void ConnectionGraph::collect_loads(Node* base, Unique_Node_List& loads) {
@@ -773,10 +781,11 @@ void ConnectionGraph::update_after_load_split(PhiNode* data_phi, AddPNode* previ
           continue;
         }
 
+      }
+
         // Push to alloc/memnode_worklist since the base has an unique_type
         alloc_worklist.append_if_missing(new_addp);
         memnode_worklist.append_if_missing(new_load);
-      }
 
       // Now let's add the node to the connection graph
       _nodes.at_grow(new_addp->_idx, nullptr);
@@ -822,10 +831,26 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
 
     Node* base_for_sr_load = ophi->in(i); // Clone address for loads from boxed objects.
 
-    if (is_castpp || is_ccpp) {
-      base_for_sr_load = _igvn->transform(cast->clone());
-      base_for_sr_load->set_req(0, nullptr);
-      base_for_sr_load->set_req(1, ophi->in(i));
+    if ((is_castpp || is_ccpp) && !base_for_sr_load->is_ConstraintCast()) {
+      Node* base = ophi->in(i);
+      JavaObjectNode* ptn = unique_java_object(base);
+      AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
+
+      const TypeOopPtr* cast_t = _igvn->type(cast)->isa_oopptr();
+      const TypeOopPtr* cast_tinst = cast_t->cast_to_instance_id(alloc->_idx);
+
+      if (cast_tinst != _igvn->type(ophi->in(i))) {
+        base_for_sr_load = ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::UnconditionalDependency);
+        if (ophi->in(i)->in(0) != nullptr) {
+          base_for_sr_load->set_req(0, ophi->in(i)->in(0));
+          //_igvn->hash_delete(ophi->in(i));
+          //ophi->in(i)->set_req(0, nullptr);
+          //_igvn->hash_insert(ophi->in(i));
+        }
+        base_for_sr_load = _igvn->transform(base_for_sr_load);
+      } else {
+        // base_for_sr_load already is ophi(in(i))
+      }
     }
 
     Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
@@ -1065,8 +1090,19 @@ void ConnectionGraph::if_on_selector(Node* current_control, Node* selector, Node
 }
 
 void ConnectionGraph::reduce_on_cast(PhiNode* ophi, Node* selector, Node* cast, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
+
+    bool update = false;
+    for (uint i = 1; i < selector->req(); i++) {
+      Node* sel_in = selector->in(i);
+
+      if (sel_in->as_ConI()->get_int() == -1) {
+        update = true;
+        break;
+      }
+    }
+
   Unique_Node_List processed_addps;
-  for (uint i = 0; i < cast->outcnt(); i++) {
+  for (int i = cast->outcnt()-1; i >= 0;) {
     Node* use = cast->raw_out(i);
     if (use->is_AddP() && !processed_addps.member(use)) {
       _igvn->hash_delete(use);
@@ -1084,56 +1120,74 @@ void ConnectionGraph::reduce_on_cast(PhiNode* ophi, Node* selector, Node* cast, 
             current_control = cast->in(0) != nullptr ? cast->in(0) : ophi->in(0);
           }
 
-          // Create an IF comparing the result of selector
-          Node* yes_sr_control = nullptr;
-          Node* not_sr_control = nullptr;
-          Node* selector_if_region = nullptr;
-          if_on_selector(current_control, selector, &yes_sr_control, &not_sr_control, &selector_if_region);
-          //use_use->set_req(0, not_sr_control);
-
-          Node* new_cast = _igvn->transform(cast->clone());
-          new_cast->set_req(0, not_sr_control);
-          use->set_req(AddPNode::Base, new_cast);
-          use->set_req(AddPNode::Address, new_cast);
-
           // This is a Phi merging values loaded from SR inputs with *default* values for NSR inputs
           Node* sr_value_phi = partial_load_split(use_use, ophi, cast, selector);
 
           update_after_load_split(sr_value_phi->as_Phi(), use->as_AddP(), use_use->as_Load(), alloc_worklist, memnode_worklist);
 
           // This is the Phi merging the value loaded from the SR and NSR inputs
-          Node* final_phi = PhiNode::make(selector_if_region, sr_value_phi, use_use->bottom_type());
+          Node* final_phi = nullptr;
 
-          // Every node using result of current Load will now use the final phi
-          for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
-            Node *load_use = use_use->last_out(k);
-            _igvn->hash_delete(load_use);
-            int uses = load_use->replace_edge(use_use, final_phi);
-            assert(uses > 0, "sanity");
-            k -= uses;
-            _igvn->_worklist.push(load_use);
-            _igvn->hash_insert(load_use);
-          }
+          if (update) {
+            // Create an IF comparing the result of selector
+            Node* yes_sr_control = nullptr;
+            Node* not_sr_control = nullptr;
+            Node* selector_if_region = nullptr;
+            if_on_selector(current_control, selector, &yes_sr_control, &not_sr_control, &selector_if_region);
 
-          // The final Phi needs to load value from the NSR side
-          final_phi->set_req(2, use_use);
+            Node* new_cast = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), not_sr_control, cast->in(1), _igvn->type(cast), ConstraintCastNode::UnconditionalDependency));
+            use->set_req(AddPNode::Base, new_cast);
+            use->set_req(AddPNode::Address, new_cast);
 
-          for (DUIterator_Fast kmax, k = current_control->fast_outs(kmax); k < kmax; k++) {
-            Node* use = current_control->fast_out(k);
-            if (!use->is_CFG() && !use->is_Phi() && use != cast && use->in(0) != nullptr) {
-              _igvn->hash_delete(use);
-              use->set_req(0, selector_if_region);
-              _igvn->hash_insert(use);
-              _igvn->_worklist.push(use);
+            final_phi = PhiNode::make(selector_if_region, sr_value_phi, use_use->bottom_type());
 
-              --k;
-              --kmax;
+            // Every node using result of current Load will now use the final phi
+            for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
+              Node *load_use = use_use->last_out(k);
+              _igvn->hash_delete(load_use);
+              int uses = load_use->replace_edge(use_use, final_phi);
+              assert(uses > 0, "sanity");
+              k -= uses;
+              _igvn->_worklist.push(load_use);
+              _igvn->hash_insert(load_use);
             }
+
+            // The final Phi needs to load value from the NSR side
+            final_phi->set_req(2, use_use);
+
+            for (DUIterator_Fast kmax, k = current_control->fast_outs(kmax); k < kmax; k++) {
+              Node* use = current_control->fast_out(k);
+              if (!use->is_CFG() && !use->is_Phi() && use != cast && use->in(0) != nullptr) {
+                _igvn->hash_delete(use);
+                use->set_req(0, selector_if_region);
+                _igvn->hash_insert(use);
+                _igvn->_worklist.push(use);
+
+                --k;
+                --kmax;
+              }
+            }
+
+            _igvn->register_new_node_with_optimizer(final_phi);
+          } else {
+            final_phi = sr_value_phi;
+
+            // Every node using result of current Load will now use the final phi
+            for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
+              Node *load_use = use_use->last_out(k);
+              _igvn->hash_delete(load_use);
+              int uses = load_use->replace_edge(use_use, final_phi);
+              assert(uses > 0, "sanity");
+              k -= uses;
+              _igvn->_worklist.push(load_use);
+              _igvn->hash_insert(load_use);
+            }
+
+            _igvn->remove_dead_node(use_use);
           }
 
           _igvn->hash_insert(use_use);
           _igvn->_worklist.push(use_use);
-          _igvn->register_new_node_with_optimizer(final_phi);
         }
       }
       _igvn->hash_insert(use);
@@ -1141,10 +1195,9 @@ void ConnectionGraph::reduce_on_cast(PhiNode* ophi, Node* selector, Node* cast, 
 
       processed_addps.push(use);
     }
-  }
 
-  for (uint i = 0; processed_addps.size(); i++) {
-
+    --i;
+    i = MIN2(i, (int)cast->outcnt()-1);
   }
 }
 
@@ -1188,25 +1241,38 @@ void ConnectionGraph::reset_merge_entries(PhiNode* ophi) {
     }
   }
 
-  _igvn->replace_node(ophi, new_phi);
-
-
-  for (uint i = 1; i < new_phi->outcnt(); i++) {
-    Node* out = new_phi->raw_out(i);
+  for (int i = ophi->outcnt()-1; i >= 0;) {
+    Node* out = ophi->raw_out(i);
 
     if (out->is_ConstraintCast()) {
       const Type* out_t = _igvn->type(out)->make_ptr();
       const Type* out_new_t = out_t->meet(TypePtr::NULL_PTR);
+      bool change = out_new_t != out_t;
 
-      if (out_new_t != out_t) {
-        ConstraintCastNode* new_cast = (ConstraintCastNode*) out->clone();
+      for (int j = out->outcnt()-1; change && j >= 0; --j) {
+        Node* out2 = out->raw_out(j);
+        if (!out2->is_SafePoint()) {
+          change = false;
+          break;
+        }
+      }
+
+      if (change) {
+        Node* new_cast = ConstraintCastNode::make_cast(out->Opcode(), out->in(0), out->in(1), out_new_t, ConstraintCastNode::StrongDependency);
         _igvn->replace_node(out, new_cast);
         _igvn->register_new_node_with_optimizer(new_cast);
       }
     }
+
+    --i;
+    i = MIN2(i, (int)ophi->outcnt()-1);
   }
 
-  save_phi_region(_compile, new_phi, "after_reset_merge_entries");
+  tty->print_cr("Replaced Phi %d with Phi %d during reset merge entries.", ophi->_idx, new_phi->_idx);
+
+  _igvn->replace_node(ophi, new_phi);
+
+  save_phi_region(_compile, _invocation, new_phi, "after_reset_merge_entries");
 }
 
 
@@ -1214,7 +1280,7 @@ void ConnectionGraph::reduce_merge(PhiNode* ophi, GrowableArray<Node *>  &alloc_
   Unique_Node_List loads;
   Unique_Node_List phi_users;
 
-  save_phi_region(_compile, ophi, "before_reduce");
+  save_phi_region(_compile, _invocation, ophi, "before_reduce");
 
   PhiNode* selector = create_selector(ophi);
 
@@ -1248,7 +1314,7 @@ void ConnectionGraph::reduce_merge(PhiNode* ophi, GrowableArray<Node *>  &alloc_
 
   _igvn->set_delay_transform(delay);
 
-  save_phi_region(_compile, ophi, "after_reduce");
+  save_phi_region(_compile, _invocation, ophi, "after_reduce");
   PhaseIdealLoop::verify(*_igvn);
 }
 
@@ -1322,6 +1388,11 @@ void ConnectionGraph::add_objload_to_connection_graph(Node *n, Unique_Node_List 
     Node* adr = n->in(MemNode::Address);
 #ifdef ASSERT
     if (!adr->is_AddP()) {
+      if (!_igvn->type(adr)->isa_rawptr()) {
+        tty->print_cr("Invocation %d", _invocation);
+        adr->dump();
+        n->dump(-2);
+      }
       assert(_igvn->type(adr)->isa_rawptr(), "sanity");
     } else {
       assert((ptnode_adr(adr->_idx) == nullptr ||
@@ -4346,6 +4417,12 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
                  use->is_DecodeNarrowPtr() ||
                  (use->is_ConstraintCast() && use->Opcode() == Op_CastPP)) {
         alloc_worklist.append_if_missing(use);
+        if (n->is_CheckCastPP() && use->is_CheckCastPP()) {
+          tty->print_cr("********** FOUND ONE ***********");
+          n->dump();
+          use->dump();
+          tty->print_cr("********** FOUND ONE ***********");
+        }
 #ifdef ASSERT
       } else if (use->is_Mem()) {
         assert(use->in(MemNode::Address) != n, "EA: missing allocation reference path");

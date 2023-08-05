@@ -21,8 +21,16 @@
 # questions.
 #
 
+
+
 hotspot_all = \
-  /
+   runtime/Metaspace/FragmentMetaspace.java
+#  compiler/uncommontrap/TestDeoptOOM.java                                                 \
+#  runtime/cds/appcds/dynamicArchive/methodHandles/MethodHandlesAsCollectorTest.java       \
+#  runtime/cds/appcds/methodHandles/MethodHandlesAsCollectorTest.java                      \
+#  compiler/vectorapi/TestMaskedMacroLogicVector.java                                      \
+#  runtime/MemberName/MemberNameLeak.java                                                  \
+#  runtime/Metaspace/FragmentMetaspace.java
 
 hotspot_all_no_apps = \
   / \
