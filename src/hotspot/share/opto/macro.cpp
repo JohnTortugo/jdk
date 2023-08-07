@@ -921,11 +921,6 @@ static void disconnect_projections(MultiNode* n, PhaseIterGVN& igvn) {
 void PhaseMacroExpand::process_users_of_allocation_cesar(CallNode *alloc) {
   Node* res = alloc->result_cast();
 
-  if (alloc->_idx == 355) {
-    alloc->dump(-3);
-    if (res == nullptr) tty->print_cr("RES was nullptr");
-  }
-
   if (res != nullptr) {
     for (DUIterator_Last jmin, j = res->last_outs(jmin); j >= jmin; ) {
       Node *use = res->last_out(j);
@@ -985,29 +980,6 @@ void PhaseMacroExpand::process_users_of_allocation_cesar(CallNode *alloc) {
     _igvn.remove_dead_node(res);
   }
 
-  save_graph(C);
-  tty->print("Checking midway through process_users_of_allocation of allocate node %d .... ", alloc->_idx);
-  PhaseIdealLoop::verify(_igvn);
-  tty->print_cr("passed.");
-
-
-  if (alloc->_idx == 355) {
-    tty->print_cr("is _callprojs.resproj               -> %d",   _callprojs.resproj == nullptr ? -1 : _callprojs.resproj->_idx);
-    _callprojs.resproj->dump();
-    tty->print_cr("is _callprojs.fallthrough_catchproj -> %d",   _callprojs.fallthrough_catchproj == nullptr ? -1 : _callprojs.fallthrough_catchproj->_idx);
-    _callprojs.fallthrough_catchproj->dump();
-    tty->print_cr("is _callprojs.fallthrough_memproj   -> %d",   _callprojs.fallthrough_memproj == nullptr   ? -1 : _callprojs.fallthrough_memproj->_idx);
-    _callprojs.fallthrough_memproj->dump();
-    tty->print_cr("is _callprojs.catchall_memproj      -> %d",   _callprojs.catchall_memproj == nullptr      ? -1 : _callprojs.catchall_memproj->_idx);
-    _callprojs.catchall_memproj->dump();
-    tty->print_cr("is _callprojs.fallthrough_ioproj    -> %d",   _callprojs.fallthrough_ioproj == nullptr    ? -1 : _callprojs.fallthrough_ioproj->_idx);
-    _callprojs.fallthrough_ioproj->dump();
-    tty->print_cr("is _callprojs.catchall_ioproj       -> %d",   _callprojs.catchall_ioproj == nullptr       ? -1 : _callprojs.catchall_ioproj->_idx);
-    _callprojs.catchall_ioproj->dump();
-    tty->print_cr("is _callprojs.catchall_catchproj    -> %d",   _callprojs.catchall_catchproj == nullptr    ? -1 : _callprojs.catchall_catchproj->_idx);
-    _callprojs.catchall_catchproj->dump();
-  }
-
   //
   // Process other users of allocation's projections
   //
@@ -1023,12 +995,6 @@ void PhaseMacroExpand::process_users_of_allocation_cesar(CallNode *alloc) {
         --j; --jmax;
       }
     }
-
-  save_graph(C);
-  tty->print("Checking after process_users_of_allocation resproj after dealing with AddPs of allocate node %d .... ", alloc->_idx);
-  PhaseIdealLoop::verify(_igvn);
-  tty->print_cr("passed.");
-
 
     for (DUIterator_Last jmin, j = _callprojs.resproj->last_outs(jmin); j >= jmin; ) {
       Node* use = _callprojs.resproj->last_out(j);
@@ -1050,68 +1016,15 @@ void PhaseMacroExpand::process_users_of_allocation_cesar(CallNode *alloc) {
     }
   }
 
-
-
-
-
-
-
-
-
-
-  save_graph(C);
-  tty->print("Checking after process_users_of_allocation resproj of allocate node %d .... ", alloc->_idx);
-  PhaseIdealLoop::verify(_igvn);
-  tty->print_cr("passed.");
-
   if (_callprojs.fallthrough_catchproj != nullptr) {
     _igvn.replace_node(_callprojs.fallthrough_catchproj, alloc->in(TypeFunc::Control));
   }
-
-
-
-
-
-
-//  save_graph(C);
-//  tty->print("Checking after process_users_of_allocation fallthrough_catchproj of allocate node %d .... ", alloc->_idx);
-//  PhaseIdealLoop::verify(_igvn);
-//  tty->print_cr("passed.");
-
   if (_callprojs.fallthrough_memproj != nullptr) {
     _igvn.replace_node(_callprojs.fallthrough_memproj, alloc->in(TypeFunc::Memory));
   }
-
-
-
-
-
-
-
-
-//  save_graph(C);
-//  tty->print("Checking after process_users_of_allocation fallthrough_memproj of allocate node %d .... ", alloc->_idx);
-//  PhaseIdealLoop::verify(_igvn);
-//  tty->print_cr("passed.");
-//
-//  if (_callprojs.catchall_memproj != nullptr) {
-//    _igvn.replace_node(_callprojs.catchall_memproj, C->top());
-//  }
-
-
-
-
-
-
-
-
-
-
-//  save_graph(C);
-//  tty->print("Checking after process_users_of_allocation catchall_memproj of allocate node %d .... ", alloc->_idx);
-//  PhaseIdealLoop::verify(_igvn);
-//  tty->print_cr("passed.");
-
+  if (_callprojs.catchall_memproj != nullptr) {
+    _igvn.replace_node(_callprojs.catchall_memproj, C->top());
+  }
   if (_callprojs.fallthrough_ioproj != nullptr) {
     _igvn.replace_node(_callprojs.fallthrough_ioproj, alloc->in(TypeFunc::I_O));
   }
