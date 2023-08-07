@@ -302,12 +302,12 @@ static void assert_dom(Block* b1, Block* b2, Node* n, const PhaseCFG* cfg) {
       }
       tty->cr();
     }
-    save_graph(cfg->C->root(), "/tmp/gcm_assert_dom.err");
-    tty->print("Block1: %d", b1->_pre_order); tty->cr();
-    tty->print("Block2: %d", b2->_pre_order); tty->cr();
-    tty->print("Method: %s::%s", cfg->C->method()->holder()->name()->as_utf8(), cfg->C->method()->name()->as_utf8()); tty->cr();
-    tty->print("Failing node: ");
-    n->dump();
+    //save_graph(cfg->C->root(), "/tmp/gcm_assert_dom.err");
+    //tty->print("Block1: %d", b1->_pre_order); tty->cr();
+    //tty->print("Block2: %d", b2->_pre_order); tty->cr();
+    //tty->print("Method: %s::%s", cfg->C->method()->holder()->name()->as_utf8(), cfg->C->method()->name()->as_utf8()); tty->cr();
+    //tty->print("Failing node: ");
+    //n->dump();
     assert(false, "unscheduable graph");
   }
 }
@@ -1345,9 +1345,9 @@ void PhaseCFG::schedule_late(VectorSet &visited, Node_Stack &stack) {
     // hoist_to_cheaper_block() will always have at least one valid choice.
     if (self->is_memory_writer()) {
       if ( ! (find_block_for_node(self->in(0)) == early) ) {
-        tty->print("Method: %s::%s", C->method()->holder()->name()->as_utf8(), C->method()->name()->as_utf8()); tty->cr();
-        tty->print_cr("Failing node: "); self->dump(1); tty->cr();
-        save_graph(C->root(), "/tmp/failed_graph.ir");
+        //tty->print("Method: %s::%s", C->method()->holder()->name()->as_utf8(), C->method()->name()->as_utf8()); tty->cr();
+        //tty->print_cr("Failing node: "); self->dump(1); tty->cr();
+        ///save_graph(C->root(), "/tmp/failed_graph.ir");
         assert(find_block_for_node(self->in(0)) == early,
               "The home of a memory writer must also be its earliest placement");
       }
