@@ -46,6 +46,7 @@
 #define MIN_BLOCK_FREQUENCY 1.e-35f
 
 #ifndef PRODUCT
+/*
 static void save_graph(Node* root, const char* filepath) {
   Unique_Node_List ideal_nodes;
   fileStream fstream(filepath);
@@ -64,7 +65,7 @@ static void save_graph(Node* root, const char* filepath) {
   }
 
   fstream.flush();
-}
+}*/
 #endif
 
 //----------------------------schedule_node_into_block-------------------------
