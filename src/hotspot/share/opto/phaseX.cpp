@@ -1069,8 +1069,6 @@ void PhaseIterGVN::trace_PhaseIterGVN(Node* n, Node* nn, const Type* oldtype) {
     uint wlsize = _worklist.size();
     const Type* newtype = type_or_null(n);
 
-    if (n == nn && oldtype == newtype);
-
     ss.print("Old Node: "); n->dump("\n", false, &ss);
     if (nn != n) {
       ss.print("New Node: "); nn->dump("\n", false, &ss);
