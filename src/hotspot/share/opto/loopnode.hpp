@@ -930,9 +930,6 @@ private:
       if (ctrl->is_MultiBranch()) {
         ctrl = ctrl->in(0);
       }
-      if (!ctrl->is_CFG()) {
-        ctrl->dump(-3);
-      }
       assert(ctrl->is_CFG(), "CFG");
     }
     return ctrl;
