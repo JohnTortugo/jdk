@@ -49,6 +49,7 @@
 #include "utilities/powerOfTwo.hpp"
 
 #ifndef PRODUCT
+/*
 static void save_graph(Node* root, const char* filepath) {
   Unique_Node_List ideal_nodes;
   fileStream fstream(filepath);
@@ -68,6 +69,7 @@ static void save_graph(Node* root, const char* filepath) {
 
   fstream.flush();
 }
+*/
 #endif
 
 //=============================================================================
@@ -5613,11 +5615,10 @@ bool PhaseIdealLoop::verify_dominance(Node* n, Node* use, Node* LCA, Node* early
     Node* d = LCA;
     while (d != early) {
       if (d == C->root()) {
-
-        tty->print_cr("bad graph. bad graph. Method and holder -> %s::%s", C->method()->holder()->name()->as_utf8(), C->method()->name()->as_utf8());
-        stringStream ss;
-        ss.print("/tmp/error_%s.txt", C->method()->name()->as_utf8());
-        save_graph(C->root(), ss.as_string());
+        //tty->print_cr("bad graph. bad graph. Method and holder -> %s::%s", C->method()->holder()->name()->as_utf8(), C->method()->name()->as_utf8());
+        //stringStream ss;
+        //ss.print("/tmp/error_%s.txt", C->method()->name()->as_utf8());
+        //save_graph(C->root(), ss.as_string());
 
         dump_bad_graph("Bad graph detected in compute_lca_of_uses", n, early, LCA);
         tty->print_cr("*** Use %d isn't dominated by def %d ***", use->_idx, n->_idx);
@@ -6090,10 +6091,10 @@ void PhaseIdealLoop::build_loop_late_post_work(Node *n, bool pinned) {
 #ifdef ASSERT
     if (legal->is_Start() && !early->is_Root()) {
       // Bad graph. Print idom path and fail.
-      tty->print_cr("bad graph. bad graph. Method and holder -> %s::%s", C->method()->holder()->name()->as_utf8(), C->method()->name()->as_utf8());
-      stringStream ss;
-      ss.print("/tmp/error_%s.txt", C->method()->name()->as_utf8());
-      save_graph(C->root(), ss.as_string());
+      //tty->print_cr("bad graph. bad graph. Method and holder -> %s::%s", C->method()->holder()->name()->as_utf8(), C->method()->name()->as_utf8());
+      //stringStream ss;
+      //ss.print("/tmp/error_%s.txt", C->method()->name()->as_utf8());
+      //save_graph(C->root(), ss.as_string());
       dump_bad_graph("Bad graph detected in build_loop_late", n, early, LCA);
       assert(false, "Bad graph detected in build_loop_late");
     }
