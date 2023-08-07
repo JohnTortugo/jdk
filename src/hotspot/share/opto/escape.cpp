@@ -4407,12 +4407,6 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
                  use->is_DecodeNarrowPtr() ||
                  (use->is_ConstraintCast() && use->Opcode() == Op_CastPP)) {
         alloc_worklist.append_if_missing(use);
-        if (n->is_CheckCastPP() && use->is_CheckCastPP()) {
-          tty->print_cr("********** FOUND ONE ***********");
-          n->dump();
-          use->dump();
-          tty->print_cr("********** FOUND ONE ***********");
-        }
 #ifdef ASSERT
       } else if (use->is_Mem()) {
         assert(use->in(MemNode::Address) != n, "EA: missing allocation reference path");
@@ -4445,8 +4439,6 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
               op == Op_StrIndexOf || op == Op_StrIndexOfChar ||
               op == Op_SubTypeCheck ||
               BarrierSet::barrier_set()->barrier_set_c2()->is_gc_barrier_node(use))) {
-          n->dump();
-          use->dump();
           assert(false, "EA: missing allocation reference path");
         }
 #endif
@@ -4573,8 +4565,6 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
               op == Op_AryEq || op == Op_StrComp || op == Op_CountPositives ||
               op == Op_StrCompressedCopy || op == Op_StrInflatedCopy ||
               op == Op_StrEquals || op == Op_StrIndexOf || op == Op_StrIndexOfChar)) {
-          n->dump();
-          use->dump();
           assert(false, "EA: missing memory path");
         }
 #endif
