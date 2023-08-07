@@ -80,6 +80,7 @@
 //   counter++;
 // }
 
+/*
 static void save_phi_region(Compile* comp, int invocation, Node* ophi, const char* label) {
   ttyLocker ttyl;
   static int counter = 1;
@@ -121,18 +122,6 @@ static void save_phi_region(Compile* comp, int invocation, Node* ophi, const cha
         Node* x = m->raw_out(k);
         if (!x) continue;
         x->dump(nullptr, false, &fstream); fstream.cr();
-
-        //for (uint l=0; l<x->outcnt(); l++) {
-        //  Node* y = x->raw_out(l);
-        //  if (!y) continue;
-        //  y->dump(nullptr, false, &fstream); fstream.cr();
-
-        //  for (uint q=0; q<y->outcnt(); q++) {
-        //    Node* z = y->raw_out(q);
-        //    if (!z) continue;
-        //    z->dump(nullptr, false, &fstream); fstream.cr();
-        //  }
-        //}
       }
     }
   }
@@ -141,6 +130,7 @@ static void save_phi_region(Compile* comp, int invocation, Node* ophi, const cha
 
   Atomic::inc(&counter);
 }
+*/
 #endif
 
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
@@ -505,7 +495,7 @@ bool ConnectionGraph::compute_escape() {
     for (uint i = 0; i < reducible_merges.size(); i++ ) {
       Node* n = reducible_merges.at(i);
 
-      save_phi_region(_compile, _invocation, n, "before_reduce_safepoints");
+      //save_phi_region(_compile, _invocation, n, "before_reduce_safepoints");
 
       if (n->outcnt() > 0) {
         if (!reduce_on_safepoints(n->as_Phi())) {
@@ -518,7 +508,7 @@ bool ConnectionGraph::compute_escape() {
         reset_merge_entries(n->as_Phi());
       }
 
-      save_phi_region(_compile, _invocation, n, "after_reduce_safepoints");
+      //save_phi_region(_compile, _invocation, n, "after_reduce_safepoints");
 
       PhaseIdealLoop::verify(*_igvn);
     }
@@ -1272,7 +1262,7 @@ void ConnectionGraph::reset_merge_entries(PhiNode* ophi) {
 
   _igvn->replace_node(ophi, new_phi);
 
-  save_phi_region(_compile, _invocation, new_phi, "after_reset_merge_entries");
+  //save_phi_region(_compile, _invocation, new_phi, "after_reset_merge_entries");
 }
 
 
@@ -1280,7 +1270,7 @@ void ConnectionGraph::reduce_merge(PhiNode* ophi, GrowableArray<Node *>  &alloc_
   Unique_Node_List loads;
   Unique_Node_List phi_users;
 
-  save_phi_region(_compile, _invocation, ophi, "before_reduce");
+  //save_phi_region(_compile, _invocation, ophi, "before_reduce");
 
   PhiNode* selector = create_selector(ophi);
 
@@ -1314,7 +1304,7 @@ void ConnectionGraph::reduce_merge(PhiNode* ophi, GrowableArray<Node *>  &alloc_
 
   _igvn->set_delay_transform(delay);
 
-  save_phi_region(_compile, _invocation, ophi, "after_reduce");
+  //save_phi_region(_compile, _invocation, ophi, "after_reduce");
   PhaseIdealLoop::verify(*_igvn);
 }
 
