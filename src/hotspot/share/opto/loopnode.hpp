@@ -982,12 +982,6 @@ public:
   void set_ctrl( Node *n, Node *ctrl ) {
     assert( !has_node(n) || has_ctrl(n), "" );
     assert( ctrl->in(0), "cannot set dead control node" );
-
-    if (!ctrl->is_CFG()) {
-      tty->print_cr("Not a CFG node (line %d): ", __LINE__);
-      ctrl->dump(3);
-    }
-
     assert( ctrl == find_non_split_ctrl(ctrl), "must set legal crtl" );
     _nodes.map( n->_idx, (Node*)((intptr_t)ctrl + 1) );
   }
@@ -1009,12 +1003,6 @@ public:
   Node* get_ctrl(const Node* i) {
     assert(has_node(i), "");
     Node *n = get_ctrl_no_update(i);
-
-    if (!n->is_CFG()) {
-      tty->print_cr("Not a CFG node (line %d): ", __LINE__);
-      n->dump(3);
-    }
-
     _nodes.map( i->_idx, (Node*)((intptr_t)n + 1) );
     assert(has_node(i) && has_ctrl(i), "");
     assert(n == find_non_split_ctrl(n), "must return legal ctrl" );
