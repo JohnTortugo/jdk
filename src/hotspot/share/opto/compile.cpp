@@ -2344,43 +2344,15 @@ void Compile::Optimize() {
 
       int mcount = macro_count(); // Record number of allocations and locks before IGVN
 
-      if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
-        tty->print("Check_after_do_analysis %d ... %s::%s ...", counter, method()->holder()->name()->as_utf8(), method()->name()->as_utf8());
-        save_graph(this, "after_do_analysis");
-        PhaseIdealLoop::verify(igvn);
-        tty->print_cr("passed.");
-      }
-
       // Optimize out fields loads from scalar replaceable allocations.
-      if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
-        igvn.cesar_optimize();
-      } else {
-        igvn.optimize();
-      }
+      igvn.optimize();
 
       if (failing())  return;
-
-      if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
-        tty->print("Check_1st_optimize %d ... %s::%s ...", counter, method()->holder()->name()->as_utf8(), method()->name()->as_utf8());
-        save_graph(this, "after_1st_optimize");
-        PhaseIdealLoop::verify(igvn);
-        tty->print_cr("passed.");
-      }
 
       if (congraph() != nullptr && macro_count() > 0) {
         TracePhase tp("macroEliminate", &timers[_t_macroEliminate]);
         PhaseMacroExpand mexp(igvn);
-
-
-//        if (method() != nullptr && method()->name() != nullptr && (strcmp(method()->name()->as_utf8(), "apply") == 0)) {
-//          mexp.eliminate_macro_nodes_cesar();
-//          tty->print("Check_after_emn %d ... %s::%s ...", counter, method()->holder()->name()->as_utf8(), method()->name()->as_utf8());
-//          save_graph(this, "after_emn");
-//          //PhaseIdealLoop::verify(igvn);
-//          tty->print_cr("passed.");
-//        } else {
-          mexp.eliminate_macro_nodes();
-//        }
+        mexp.eliminate_macro_nodes();
         igvn.set_delay_transform(false);
 
         igvn.optimize();

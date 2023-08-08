@@ -1270,23 +1270,23 @@ void PhaseIterGVN::optimize() {
   NOT_PRODUCT(verify_PhaseIterGVN();)
 }
 
-void PhaseIterGVN::cesar_optimize() {
-  init_verifyPhaseIterGVN();
-
-  while(_worklist.size()) {
-    Node* n  = _worklist.pop();
-    stringStream ss;
-    trace_PhaseIterGVN_verbose_cesar(n, 1, &ss);
-    if (n->outcnt() != 0) {
-      const Type* oldtype = type_or_null(n);
-      Node* nn = transform_old(n);
-      trace_PhaseIterGVN_cesar(n, nn, oldtype, &ss);
-    } else if (!n->is_top()) {
-      remove_dead_node(n);
-    }
-  }
-  verify_PhaseIterGVN();
-}
+// void PhaseIterGVN::cesar_optimize() {
+//   init_verifyPhaseIterGVN();
+// 
+//   while(_worklist.size()) {
+//     Node* n  = _worklist.pop();
+//     stringStream ss;
+//     trace_PhaseIterGVN_verbose_cesar(n, 1, &ss);
+//     if (n->outcnt() != 0) {
+//       const Type* oldtype = type_or_null(n);
+//       Node* nn = transform_old(n);
+//       trace_PhaseIterGVN_cesar(n, nn, oldtype, &ss);
+//     } else if (!n->is_top()) {
+//       remove_dead_node(n);
+//     }
+//   }
+//   verify_PhaseIterGVN();
+// }
 
 #ifdef ASSERT
 void PhaseIterGVN::verify_optimize() {
