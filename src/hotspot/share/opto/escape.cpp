@@ -969,7 +969,7 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
             Node* yes_sr_control = nullptr;
             Node* not_sr_control = nullptr;
             Node* selector_if_region = nullptr;
-            if_on_selector(current_control, selector, &yes_sr_control, &not_sr_control, &selector_if_region);
+            create_if_on_selector(current_control, selector, &yes_sr_control, &not_sr_control, &selector_if_region);
 
             Node* new_cast = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), not_sr_control, cast->in(1), _igvn->type(cast), ConstraintCastNode::UnconditionalDependency));
             use->set_req(AddPNode::Base, new_cast);
