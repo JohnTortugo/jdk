@@ -927,8 +927,18 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
 //  under an IfNode and it's only executed if a NSR input of 'ophi' was
 //  selected.
 void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector, Node* cast, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
+    bool update = false;
+    for (uint i = 1; i < selector->req(); i++) {
+      Node* sel_in = selector->in(i);
+
+      if (sel_in->as_ConI()->get_int() == -1) {
+        update = true;
+        break;
+      }
+    }
+
   Unique_Node_List processed_addps;
-  for (uint i = 0; i < cast->outcnt(); i++) {
+  for (int i = cast->outcnt()-1; i >= 0;) {
     Node* use = cast->raw_out(i);
     if (use->is_AddP() && !processed_addps.member(use)) {
       _igvn->hash_delete(use);
@@ -938,20 +948,13 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
         if (use_use->is_Load()) {
           _igvn->hash_delete(use_use);
 
-          Node* current_control = use_use->in(0) != nullptr ? use_use->in(0) :
-                                  cast->in(0)    != nullptr ? cast->in(0)    :
-                                                              ophi->in(0);
+          Node* current_control = nullptr;
 
-          // Create an IF comparing the result of selector
-          Node* yes_sr_control = nullptr;
-          Node* not_sr_control = nullptr;
-          Node* new_end_region = nullptr;
-          create_if_on_selector(current_control, selector, &yes_sr_control, &not_sr_control, &new_end_region);
-
-          Node* new_cast = _igvn->transform(cast->clone());
-          new_cast->set_req(0, not_sr_control);
-          use->set_req(AddPNode::Base, new_cast);
-          use->set_req(AddPNode::Address, new_cast);
+          if (use_use->in(0) != nullptr) {
+            current_control = use_use->in(0);
+          } else {
+            current_control = cast->in(0) != nullptr ? cast->in(0) : ophi->in(0);
+          }
 
           // This is a Phi merging values loaded from SR inputs with *default* values for NSR inputs
           Node* sr_value_phi = partial_load_split(use_use, ophi, cast, selector);
@@ -959,43 +962,68 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
           update_after_load_split(sr_value_phi->as_Phi(), use->as_AddP(), use_use->as_Load(), alloc_worklist, memnode_worklist);
 
           // This is the Phi merging the value loaded from the SR and NSR inputs
-          Node* final_phi = PhiNode::make(new_end_region, sr_value_phi, use_use->bottom_type());
+          Node* final_phi = nullptr;
 
-          // Every node using result of current Load will now use the final phi
-          for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
-            Node *load_use = use_use->last_out(k);
-            _igvn->hash_delete(load_use);
-            int uses = load_use->replace_edge(use_use, final_phi);
-            assert(uses > 0, "sanity");
-            k -= uses;
-            _igvn->_worklist.push(load_use);
-            _igvn->hash_insert(load_use);
-          }
+          if (update) {
+            // Create an IF comparing the result of selector
+            Node* yes_sr_control = nullptr;
+            Node* not_sr_control = nullptr;
+            Node* selector_if_region = nullptr;
+            if_on_selector(current_control, selector, &yes_sr_control, &not_sr_control, &selector_if_region);
 
-          // The final Phi needs to load value from the NSR side
-          final_phi->set_req(2, use_use);
+            Node* new_cast = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), not_sr_control, cast->in(1), _igvn->type(cast), ConstraintCastNode::UnconditionalDependency));
+            use->set_req(AddPNode::Base, new_cast);
+            use->set_req(AddPNode::Address, new_cast);
 
-          // Some of the users of 'current_control' need now to use the
-          // RegionNode that we just inserted after 'current_control'. Not all
-          // nodes can/should be updated, though.  Phi nodes, for instance,
-          // should not since they are related to the inputs of their control
-          // node.
-          for (DUIterator_Fast kmax, k = current_control->fast_outs(kmax); k < kmax; k++) {
-            Node* use = current_control->fast_out(k);
-            if (!use->is_CFG() && !use->is_Phi() && use != cast && use->in(0) != nullptr) {
-              _igvn->hash_delete(use);
-              use->set_req(0, new_end_region);
-              _igvn->hash_insert(use);
-              _igvn->_worklist.push(use);
+            final_phi = PhiNode::make(selector_if_region, sr_value_phi, use_use->bottom_type());
 
-              --k;
-              --kmax;
+            // Every node using result of current Load will now use the final phi
+            for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
+              Node *load_use = use_use->last_out(k);
+              _igvn->hash_delete(load_use);
+              int uses = load_use->replace_edge(use_use, final_phi);
+              assert(uses > 0, "sanity");
+              k -= uses;
+              _igvn->_worklist.push(load_use);
+              _igvn->hash_insert(load_use);
             }
+
+            // The final Phi needs to load value from the NSR side
+            final_phi->set_req(2, use_use);
+
+            for (DUIterator_Fast kmax, k = current_control->fast_outs(kmax); k < kmax; k++) {
+              Node* use = current_control->fast_out(k);
+              if (!use->is_CFG() && !use->is_Phi() && use != cast && use->in(0) != nullptr) {
+                _igvn->hash_delete(use);
+                use->set_req(0, selector_if_region);
+                _igvn->hash_insert(use);
+                _igvn->_worklist.push(use);
+
+                --k;
+                --kmax;
+              }
+            }
+
+            _igvn->register_new_node_with_optimizer(final_phi);
+          } else {
+            final_phi = sr_value_phi;
+
+            // Every node using result of current Load will now use the final phi
+            for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
+              Node *load_use = use_use->last_out(k);
+              _igvn->hash_delete(load_use);
+              int uses = load_use->replace_edge(use_use, final_phi);
+              assert(uses > 0, "sanity");
+              k -= uses;
+              _igvn->_worklist.push(load_use);
+              _igvn->hash_insert(load_use);
+            }
+
+            _igvn->remove_dead_node(use_use);
           }
 
           _igvn->hash_insert(use_use);
           _igvn->_worklist.push(use_use);
-          _igvn->register_new_node_with_optimizer(final_phi);
         }
       }
       _igvn->hash_insert(use);
@@ -1003,6 +1031,9 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
 
       processed_addps.push(use);
     }
+
+    --i;
+    i = MIN2(i, (int)cast->outcnt()-1);
   }
 }
 
@@ -1135,22 +1166,34 @@ void ConnectionGraph::reset_merge_entries(PhiNode* ophi) {
     }
   }
 
-  _igvn->replace_node(ophi, new_phi);
-
-  for (uint i = 1; i < new_phi->outcnt(); i++) {
-    Node* out = new_phi->raw_out(i);
+  for (int i = ophi->outcnt()-1; i >= 0;) {
+    Node* out = ophi->raw_out(i);
 
     if (out->is_ConstraintCast()) {
       const Type* out_t = _igvn->type(out)->make_ptr();
       const Type* out_new_t = out_t->meet(TypePtr::NULL_PTR);
+      bool change = out_new_t != out_t;
 
-      if (out_new_t != out_t) {
-        ConstraintCastNode* new_cast = (ConstraintCastNode*) out->clone();
+      for (int j = out->outcnt()-1; change && j >= 0; --j) {
+        Node* out2 = out->raw_out(j);
+        if (!out2->is_SafePoint()) {
+          change = false;
+          break;
+        }
+      }
+
+      if (change) {
+        Node* new_cast = ConstraintCastNode::make_cast(out->Opcode(), out->in(0), out->in(1), out_new_t, ConstraintCastNode::StrongDependency);
         _igvn->replace_node(out, new_cast);
         _igvn->register_new_node_with_optimizer(new_cast);
       }
     }
+
+    --i;
+    i = MIN2(i, (int)ophi->outcnt()-1);
   }
+
+  _igvn->replace_node(ophi, new_phi);
 }
 
 // Reduce phi users that aren't related to debugging information:
