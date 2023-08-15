@@ -4441,9 +4441,10 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
     Node* phi = reducible_merges.at(i);
     for (DUIterator_Fast jmax, j = phi->fast_outs(jmax); j < jmax; j++) {
       Node* use = phi->fast_out(j);
-      if (!use->is_SafePoint()) {
-        phi->dump(-3);
-        assert(false, "Unexpected user of reducible Phi -> %s", use->Name());
+      if (!use->is_SafePoint() && !use->is_ConstraintCast() && !use->is_Cmp() && use->outcnt() > 0) {
+        phi->dump(-2);
+        use->dump(-2);
+        assert(false, "Unexpected user of reducible Phi -> %d:%s", use->_idx, use->Name());
       }
     }
   }

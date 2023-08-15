@@ -133,6 +133,8 @@ class ObjectValue: public ScopeValue {
   GrowableArray<ScopeValue*> _field_values;
   Handle                     _value;
   bool                       _visited;
+  bool                       _was_scalar_replaced;     // Whether this ObjectValue describe an object scalar replaced or just
+                                                       // an object (possibly null) participating in an allocation merge.
   bool                       _is_root;   // Will be true if this object is referred to
                                          // as a local/expression/monitor in the JVMs.
                                          // Otherwise false, meaning it's just a candidate
@@ -144,6 +146,7 @@ class ObjectValue: public ScopeValue {
      , _field_values()
      , _value()
      , _visited(false)
+     , _was_scalar_replaced(true)
      , _is_root(true) {
     assert(klass->is_constant_oop(), "should be constant java mirror oop");
   }
@@ -154,6 +157,7 @@ class ObjectValue: public ScopeValue {
      , _field_values()
      , _value()
      , _visited(false)
+     , _was_scalar_replaced(true)
      , _is_root(true) {}
 
   // Accessors
@@ -165,12 +169,14 @@ class ObjectValue: public ScopeValue {
   virtual int                 field_size()                { return _field_values.length(); }
   virtual Handle              value() const               { return _value; }
   bool                        is_visited() const          { return _visited; }
+  bool                        was_scalar_replaced() const { return _was_scalar_replaced; }
   bool                        is_root() const             { return _is_root; }
 
   void                        set_id(int id)              { _id = id; }
   virtual void                set_value(oop value);
-  void                        set_visited(bool visited)   { _visited = visited; }
-  void                        set_root(bool root)         { _is_root = root; }
+  void                        set_visited(bool visited)     { _visited = visited; }
+  void                        set_was_scalar_replaced(bool scd) { _was_scalar_replaced = scd; }
+  void                        set_root(bool root)           { _is_root = root; }
 
   // Serialization of debugging information
   void read_object(DebugInfoReadStream* stream);

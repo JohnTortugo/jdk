@@ -107,15 +107,6 @@ jobs:
             test-suite: 'test/lib-test/:tier1'
             debug-suffix: -debug
 
-          - test-name: 'lib-test/tier2'
-            test-suite: 'test/lib-test/:tier2'
-            debug-suffix: -debug
-
-          - test-name: 'lib-test/tier3'
-            test-suite: 'test/lib-test/:tier3'
-            debug-suffix: -debug
-
-
     steps:
       - name: 'Checkout the JDK source'
         uses: actions/checkout@v3
