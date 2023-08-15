@@ -891,10 +891,26 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
 
     Node* base_for_sr_load = ophi->in(i); // Clone address for loads from boxed objects.
 
-    if (is_castpp || is_ccpp) {
-      base_for_sr_load = _igvn->transform(cast->clone());
-      base_for_sr_load->set_req(0, nullptr);
-      base_for_sr_load->set_req(1, ophi->in(i));
+    if ((is_castpp || is_ccpp) && !base_for_sr_load->is_ConstraintCast()) {
+      Node* base = ophi->in(i);
+      JavaObjectNode* ptn = unique_java_object(base);
+      AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
+
+      const TypeOopPtr* cast_t = _igvn->type(cast)->isa_oopptr();
+      const TypeOopPtr* cast_tinst = cast_t->cast_to_instance_id(alloc->_idx);
+
+      if (cast_tinst != _igvn->type(ophi->in(i))) {
+        base_for_sr_load = ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::UnconditionalDependency);
+        if (ophi->in(i)->in(0) != nullptr) {
+          base_for_sr_load->set_req(0, ophi->in(i)->in(0));
+          //_igvn->hash_delete(ophi->in(i));
+          //ophi->in(i)->set_req(0, nullptr);
+          //_igvn->hash_insert(ophi->in(i));
+        }
+        base_for_sr_load = _igvn->transform(base_for_sr_load);
+      } else {
+        // base_for_sr_load already is ophi(in(i))
+      }
     }
 
     Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
