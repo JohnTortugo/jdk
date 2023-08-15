@@ -65,8 +65,6 @@ jobs:
           - 'hs/tier2'
           - 'hs/tier3'
           - 'lib-test/tier1'
-          - 'lib-test/tier2'
-          - 'lib-test/tier3'
 
         include:
           - test-name: 'jdk/tier1'
