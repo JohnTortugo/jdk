@@ -44,6 +44,94 @@
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
+/*
+static void save_ophi_header_graph(Compile* comp, Node* phi) {
+  static int counter = 1;
+
+  // Only care for this method for now
+  if (strcmp(comp->method()->name()->as_utf8(), "testSpreadArguments") != 0) {
+    return ;
+  }
+
+  stringStream ss;
+  ss.print("/tmp/ophi_header_graph__%d.ir", counter);
+  Unique_Node_List ideal_nodes;
+  fileStream fstream(ss.as_string());
+
+  for (uint i=1; i<phi->req(); i++) {
+    Node* m = phi->in(i);
+    ideal_nodes.push(m);
+  }
+
+  for( uint next = 0; next < ideal_nodes.size() && next < 100; ++next ) {
+    Node* n = ideal_nodes.at(next);
+
+    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
+    fstream.cr();
+
+    for (uint i=0; i<n->outcnt(); i++) {
+      Node* m = n->raw_out(i);
+      ideal_nodes.push(m);
+    }
+  }
+
+  fstream.flush();
+
+  tty->print_cr("----------------------------------------");
+  tty->print_cr("Partial graph dumped to: %s", ss.as_string());
+
+  Atomic::inc(&counter);
+}
+
+static void save_partial_graph(Compile* comp, Node* phi) {
+  static int counter = 1;
+
+  // Only care for this method for now
+  if (strcmp(comp->method()->name()->as_utf8(), "testSpreadArguments") != 0) {
+    return ;
+  }
+
+  stringStream ss;
+  ss.print("/tmp/partial_graph__%d.ir", counter);
+  Unique_Node_List ideal_nodes;
+  fileStream fstream(ss.as_string());
+
+  ideal_nodes.push(phi);
+  for( uint next = 0; next < ideal_nodes.size() && next < 50; ++next ) {
+    Node* n = ideal_nodes.at(next);
+
+    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
+    fstream.cr();
+
+    for (uint i=0; i<n->outcnt(); i++) {
+      Node* m = n->raw_out(i);
+      ideal_nodes.push(m);
+    }
+  }
+
+  ideal_nodes.clear();
+  ideal_nodes.push(phi);
+  for( uint next = 0; next < ideal_nodes.size() && next < 50; ++next ) {
+    Node* n = ideal_nodes.at(next);
+
+    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
+    fstream.cr();
+
+    for (uint i=0; i<n->req(); i++) {
+      Node* m = n->in(i);
+      ideal_nodes.push(m);
+    }
+  }
+
+  fstream.flush();
+
+  tty->print_cr("----------------------------------------");
+  tty->print_cr("Partial graph dumped to: %s", ss.as_string());
+
+  Atomic::inc(&counter);
+}
+*/
+
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
   // If ReduceAllocationMerges is enabled we might call split_through_phi during
   // split_unique_types and that will create additional nodes that need to be
@@ -616,7 +704,7 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
     return false;
   }
 
-  NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("Can reduce Phi %d during invocation %d: ", ophi->_idx, _invocation); })
+  NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("%s) Can reduce Phi %d during invocation %d: ", _compile->method()->name()->as_utf8(), ophi->_idx, _invocation); })
   return true;
 }
 
@@ -890,41 +978,36 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
       in = in->in(LoopNode::EntryControl);
     }
 
-    Node* base_for_sr_load = ophi->in(i); // Clone address for loads from boxed objects.
+    Node* base_for_sr_load = ophi->in(i);
 
-    if ((is_castpp || is_ccpp) && !base_for_sr_load->is_ConstraintCast()) {
-      Node* base = ophi->in(i);
-      JavaObjectNode* ptn = unique_java_object(base);
-      AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
+    if (is_castpp || is_ccpp) {
+      if (_igvn->type(cast) != _igvn->type(ophi->in(i))) {
+        Node* base = ophi->in(i);
+        JavaObjectNode* ptn = unique_java_object(base);
+        AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
 
-      const TypeOopPtr* cast_t = _igvn->type(cast)->isa_oopptr();
-      const TypeOopPtr* cast_tinst = cast_t->cast_to_instance_id(alloc->_idx);
+        const TypeOopPtr* cast_t = _igvn->type(cast)->isa_oopptr();
+        const TypeOopPtr* cast_tinst = cast_t->cast_to_exactness(true)->cast_to_instance_id(alloc->_idx);
 
-      if (cast_tinst != _igvn->type(ophi->in(i))) {
-        base_for_sr_load = ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::UnconditionalDependency);
-        if (ophi->in(i)->in(0) != nullptr) {
-          base_for_sr_load->set_req(0, ophi->in(i)->in(0));
-          //_igvn->hash_delete(ophi->in(i));
-          //ophi->in(i)->set_req(0, nullptr);
-          //_igvn->hash_insert(ophi->in(i));
+        if (cast_tinst != _igvn->type(ophi->in(i))) {
+          base_for_sr_load = ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::UnconditionalDependency);
+          if (ophi->in(i)->in(0) != nullptr) {
+            base_for_sr_load->set_req(0, ophi->in(i)->in(0));
+          }
+          base_for_sr_load = _igvn->transform(base_for_sr_load);
+        } else {
+          // base_for_sr_load already is ophi(in(i))
         }
-        base_for_sr_load = _igvn->transform(base_for_sr_load);
-      } else {
-        // base_for_sr_load already is ophi(in(i))
       }
     }
 
     Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
-    Node* sr_load = nsr_load->clone();
+    const TypePtr* adr_type = sr_load_addr->bottom_type()->is_ptr();
+    Node* sr_load = _igvn->transform(LoadNode::make(*_igvn, nullptr, (memory->is_Phi() && (memory->in(0) == region)) ? memory->in(i) : memory, sr_load_addr, adr_type, load_type, load_type->basic_type(), MemNode::unordered));
 
-    sr_load->set_req(LoadNode::Control, nullptr);
-    sr_load->set_req(LoadNode::Address, sr_load_addr);
-    sr_load->set_req(LoadNode::Memory, (memory->is_Phi() && (memory->in(0) == region)) ? memory->in(i) : memory);
-
-    const Type *t = sr_load->Value(_igvn);
-    _igvn->set_type(sr_load, t);
-    sr_load->raise_bottom_type(t);
-    _igvn->_worklist.push(sr_load);
+    if (sr_load->is_DecodeN()) {
+      sr_load = sr_load->in(1);
+    }
 
     phi->set_req(i, sr_load);
   }

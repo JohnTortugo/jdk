@@ -258,7 +258,8 @@ ObjectValue* ObjectMergeValue::select(frame& fr, RegisterMap& reg_map) {
 
     // No need to rematerialize
     _selected->set_was_scalar_replaced(false);
-    return nullptr;
+
+    return _selected;
   } else {
     assert(selector < _possible_objects.length(), "sanity");
     _selected = (ObjectValue*) _possible_objects.at(selector);
