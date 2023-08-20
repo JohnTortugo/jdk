@@ -927,11 +927,11 @@ void ConnectionGraph::update_after_load_split(PhiNode* data_phi, AddPNode* previ
         if (jobj_ptn == nullptr || !jobj_ptn->scalar_replaceable()) {
           continue;
         }
+      }
 
         // Push to alloc/memnode_worklist since the base has an unique_type
         alloc_worklist.append_if_missing(new_addp);
         memnode_worklist.append_if_missing(new_load);
-      }
 
       // Now let's add the node to the connection graph
       _nodes.at_grow(new_addp->_idx, nullptr);
@@ -963,6 +963,10 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
   Node* region          = ophi->in(0);
   Node* phi             = PhiNode::make(region, nsr_value, load_type);
 
+  //tty->print_cr("-----------------------------------------------------------------");
+  //tty->print_cr("ophi: " ); ophi->dump(1);
+  //tty->print_cr("cast: " ); if (cast != nullptr) cast->dump();
+
   for (uint i = 1; i < selector->req(); i++) {
     Node* in = region->in(i);
     Node* sel_in = selector->in(i);
@@ -981,7 +985,12 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
     Node* base_for_sr_load = ophi->in(i);
 
     if (is_castpp || is_ccpp) {
-      if (_igvn->type(cast) != _igvn->type(ophi->in(i))) {
+
+
+      if (!_igvn->type(cast)->higher_equal(_igvn->type(ophi->in(i)))) {
+      //if (_igvn->type(cast) != _igvn->type(ophi->in(i))) {
+        //tty->print_cr("Different type.");
+
         Node* base = ophi->in(i);
         JavaObjectNode* ptn = unique_java_object(base);
         AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
@@ -989,15 +998,18 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
         const TypeOopPtr* cast_t = _igvn->type(cast)->isa_oopptr();
         const TypeOopPtr* cast_tinst = cast_t->cast_to_exactness(true)->cast_to_instance_id(alloc->_idx);
 
-        if (cast_tinst != _igvn->type(ophi->in(i))) {
-          base_for_sr_load = ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::UnconditionalDependency);
-          if (ophi->in(i)->in(0) != nullptr) {
-            base_for_sr_load->set_req(0, ophi->in(i)->in(0));
-          }
-          base_for_sr_load = _igvn->transform(base_for_sr_load);
+        //if (cast_tinst != _igvn->type(ophi->in(i))) {
+        if (!cast_tinst->higher_equal(_igvn->type(ophi->in(i)))) {
+          //tty->print_cr("\t Still different type.");
+          base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
+          //base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i)->is_ConstraintCast() ? ophi->in(i)->in(1) : ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
+          //tty->print("\t\t The cast is: "); base_for_sr_load->dump(1);
         } else {
+          //tty->print_cr("\t Now same type.");
           // base_for_sr_load already is ophi(in(i))
         }
+      } else {
+        //tty->print_cr("Same type.");
       }
     }
 
@@ -1008,6 +1020,9 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
     if (sr_load->is_DecodeN()) {
       sr_load = sr_load->in(1);
     }
+
+    //tty->print("\t\tAddP: "); sr_load_addr->dump();
+    //tty->print("\t\tLoad: "); sr_load->dump(1);
 
     phi->set_req(i, sr_load);
   }
