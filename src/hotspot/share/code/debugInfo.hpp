@@ -140,25 +140,16 @@ class ObjectValue: public ScopeValue {
                                          // Otherwise false, meaning it's just a candidate
                                          // in an object allocation merge.
  public:
-  ObjectValue(int id, ScopeValue* klass)
+  ObjectValue(int id, ScopeValue* klass = nullptr, bool was_scalar_replaced = true)
      : _id(id)
      , _klass(klass)
      , _field_values()
      , _value()
      , _visited(false)
-     , _was_scalar_replaced(true)
+     , _was_scalar_replaced(was_scalar_replaced)
      , _is_root(true) {
-    assert(klass->is_constant_oop(), "should be constant java mirror oop");
+    assert(klass == nullptr || klass->is_constant_oop(), "should be constant java mirror oop");
   }
-
-  ObjectValue(int id)
-     : _id(id)
-     , _klass(nullptr)
-     , _field_values()
-     , _value()
-     , _visited(false)
-     , _was_scalar_replaced(true)
-     , _is_root(true) {}
 
   // Accessors
   bool                        is_object() const           { return true; }
@@ -214,14 +205,14 @@ protected:
   ObjectValue*               _selected;
 public:
   ObjectMergeValue(int id, ScopeValue* merge_pointer, ScopeValue* selector)
-     : ObjectValue(id)
+     : ObjectValue(id, nullptr, false)
      , _selector(selector)
      , _merge_pointer(merge_pointer)
      , _possible_objects()
      , _selected(nullptr) {}
 
   ObjectMergeValue(int id)
-     : ObjectValue(id)
+     : ObjectValue(id, nullptr, false)
      , _selector(nullptr)
      , _merge_pointer(nullptr)
      , _possible_objects()
