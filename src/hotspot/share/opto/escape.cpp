@@ -619,6 +619,23 @@ bool ConnectionGraph::can_reduce_phi_check_users(Node* base, int nesting_level) 
         return false;
       }
     } else if (use->is_CastPP() || use->is_CheckCastPP()) {
+      const Type* cast_type = _igvn->type(use)->is_instptr()->cast_to_exactness(true);
+
+      // Make sure the cast is a downcast for all inputs of the Phi
+      for (uint i=1; i<base->req(); i++) {
+        JavaObjectNode* ptn = unique_java_object(base->in(i));
+        if (ptn == nullptr || !ptn->scalar_replaceable())
+          continue;
+
+        if (!cast_type->higher_equal(_igvn->type(base->in(i)))) {
+          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because cast is not to a subtype of input %d.", i);)
+          tty->print("Cast: "); use->dump();
+          tty->print("Base: "); base->in(i)->dump();
+          return false;
+        }
+      }
+      tty->print_cr("Cast is fine.");
+
       if (!can_reduce_phi_check_users(use, nesting_level+1)) {
         return false;
       }
@@ -690,7 +707,8 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
   // method we might have disabled the compilation and be retrying with RAM
   // disabled.
   // If EliminateAllocations is False, there is no point in reducing merges.
-  if (!_compile->do_reduce_allocation_merges()) {
+  // For now we only do RAM in the first invocation so that we don't create nested SafePointScalarMergedObjects.
+  if (!_compile->do_reduce_allocation_merges() || _invocation > 0) {
     return false;
   }
 
@@ -957,8 +975,6 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
   Node* address         = nsr_load->in(LoadNode::Address);
   Node* memory          = nsr_load->in(LoadNode::Memory);
   const Type* load_type = nsr_load->bottom_type();
-  bool is_castpp        = cast != nullptr && cast->is_CastPP();
-  bool is_ccpp          = cast != nullptr && cast->is_CheckCastPP();
   Node* nsr_value       = _igvn->zerocon(load_type->basic_type());
   Node* region          = ophi->in(0);
   Node* phi             = PhiNode::make(region, nsr_value, load_type);
@@ -983,34 +999,15 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
     }
 
     Node* base_for_sr_load = ophi->in(i);
+    Node* base             = base_for_sr_load;
+    JavaObjectNode* ptn    = unique_java_object(base);
+    AllocateNode* alloc    = ptn->ideal_node()->as_Allocate();
 
-    if (is_castpp || is_ccpp) {
+    const TypeOopPtr* cast_t     = _igvn->type(cast)->isa_oopptr();
+    const TypeOopPtr* cast_tinst = cast_t->cast_to_exactness(true)->cast_to_instance_id(alloc->_idx);
 
-
-      if (!_igvn->type(cast)->higher_equal(_igvn->type(ophi->in(i)))) {
-      //if (_igvn->type(cast) != _igvn->type(ophi->in(i))) {
-        //tty->print_cr("Different type.");
-
-        Node* base = ophi->in(i);
-        JavaObjectNode* ptn = unique_java_object(base);
-        AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
-
-        const TypeOopPtr* cast_t = _igvn->type(cast)->isa_oopptr();
-        const TypeOopPtr* cast_tinst = cast_t->cast_to_exactness(true)->cast_to_instance_id(alloc->_idx);
-
-        //if (cast_tinst != _igvn->type(ophi->in(i))) {
-        if (!cast_tinst->higher_equal(_igvn->type(ophi->in(i)))) {
-          //tty->print_cr("\t Still different type.");
+    if (cast_tinst != _igvn->type(ophi->in(i))) {
           base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
-          //base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i)->is_ConstraintCast() ? ophi->in(i)->in(1) : ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
-          //tty->print("\t\t The cast is: "); base_for_sr_load->dump(1);
-        } else {
-          //tty->print_cr("\t Now same type.");
-          // base_for_sr_load already is ophi(in(i))
-        }
-      } else {
-        //tty->print_cr("Same type.");
-      }
     }
 
     Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
@@ -1042,12 +1039,12 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
 //  under an IfNode and it's only executed if a NSR input of 'ophi' was
 //  selected.
 void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector, Node* cast, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
-    bool update = false;
+    bool ophi_has_nsr_input = false;
     for (uint i = 1; i < selector->req(); i++) {
       Node* sel_in = selector->in(i);
 
       if (sel_in->as_ConI()->get_int() == -1) {
-        update = true;
+        ophi_has_nsr_input = true;
         break;
       }
     }
@@ -1079,7 +1076,7 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
           // This is the Phi merging the value loaded from the SR and NSR inputs
           Node* final_phi = nullptr;
 
-          if (update) {
+          if (ophi_has_nsr_input) {
             // Create an IF comparing the result of selector
             Node* yes_sr_control = nullptr;
             Node* not_sr_control = nullptr;
