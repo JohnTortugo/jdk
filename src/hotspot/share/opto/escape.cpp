@@ -44,12 +44,11 @@
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
-/*
 static void save_ophi_header_graph(Compile* comp, Node* phi) {
   static int counter = 1;
 
   // Only care for this method for now
-  if (strcmp(comp->method()->name()->as_utf8(), "testSpreadArguments") != 0) {
+  if (strcmp(comp->method()->name()->as_utf8(), "accept") != 0) {
     return ;
   }
 
@@ -83,6 +82,7 @@ static void save_ophi_header_graph(Compile* comp, Node* phi) {
   Atomic::inc(&counter);
 }
 
+/*
 static void save_partial_graph(Compile* comp, Node* phi) {
   static int counter = 1;
 
@@ -629,8 +629,8 @@ bool ConnectionGraph::can_reduce_phi_check_users(Node* base, int nesting_level) 
 
         if (!cast_type->higher_equal(_igvn->type(base->in(i)))) {
           NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because cast is not to a subtype of input %d.", i);)
-          tty->print("Cast: "); use->dump();
-          tty->print("Base: "); base->in(i)->dump();
+          //tty->print("Cast: "); use->dump();
+          //tty->print("Base: "); base->in(i)->dump();
           return false;
         }
       }
@@ -1007,7 +1007,7 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
     const TypeOopPtr* cast_tinst = cast_t->cast_to_exactness(true)->cast_to_instance_id(alloc->_idx);
 
     if (cast_tinst != _igvn->type(ophi->in(i))) {
-          base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), nullptr, ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
+          base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), ophi->in(i)->in(0), ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
     }
 
     Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
@@ -1317,6 +1317,8 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_wo
   Unique_Node_List phi_users;
   PhiNode* selector = nullptr;
 
+  save_ophi_header_graph(_compile, ophi);
+
   bool delay = _igvn->delay_transform();
   _igvn->set_delay_transform(true);
   _igvn->hash_delete(ophi);
@@ -1350,6 +1352,8 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_wo
       return;
     }
   }
+
+  save_ophi_header_graph(_compile, ophi);
 
   _igvn->set_delay_transform(delay);
 }
