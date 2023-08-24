@@ -133,7 +133,7 @@ class ObjectValue: public ScopeValue {
   GrowableArray<ScopeValue*> _field_values;
   Handle                     _value;
   bool                       _visited;
-  bool                       _was_scalar_replaced;     // Whether this ObjectValue describe an object scalar replaced or just
+  bool                       _was_scalar_replaced;     // Whether this ObjectValue describes an object scalar replaced or just
                                                        // an object (possibly null) participating in an allocation merge.
   bool                       _is_root;   // Will be true if this object is referred to
                                          // as a local/expression/monitor in the JVMs.
@@ -165,9 +165,9 @@ class ObjectValue: public ScopeValue {
 
   void                        set_id(int id)              { _id = id; }
   virtual void                set_value(oop value);
-  void                        set_visited(bool visited)     { _visited = visited; }
+  void                        set_visited(bool visited)   { _visited = visited; }
   void                        set_was_scalar_replaced(bool scd) { _was_scalar_replaced = scd; }
-  void                        set_root(bool root)           { _is_root = root; }
+  void                        set_root(bool root)         { _is_root = root; }
 
   // Serialization of debugging information
   void read_object(DebugInfoReadStream* stream);

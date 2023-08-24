@@ -148,7 +148,7 @@ GrowableArray<ScopeValue*>* ScopeDesc::objects_to_rematerialize(frame& frm, Regi
 
     if (sv->is_object_merge()) {
       sv = sv->as_ObjectMergeValue()->select(frm, map);
-      // 'select(...)' may return an ObjectValue that actually represent a
+      // 'select(...)' may return an ObjectValue that actually represents a
       // non-scalar replaced object participating in a merge.
       if (!sv->was_scalar_replaced()) {
         continue;

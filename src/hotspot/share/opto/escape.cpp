@@ -44,93 +44,7 @@
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
-static void save_ophi_header_graph(Compile* comp, Node* phi) {
-  static int counter = 1;
 
-  // Only care for this method for now
-  if (strcmp(comp->method()->name()->as_utf8(), "accept") != 0) {
-    return ;
-  }
-
-  stringStream ss;
-  ss.print("/tmp/ophi_header_graph__%d.ir", counter);
-  Unique_Node_List ideal_nodes;
-  fileStream fstream(ss.as_string());
-
-  for (uint i=1; i<phi->req(); i++) {
-    Node* m = phi->in(i);
-    ideal_nodes.push(m);
-  }
-
-  for( uint next = 0; next < ideal_nodes.size() && next < 100; ++next ) {
-    Node* n = ideal_nodes.at(next);
-
-    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
-    fstream.cr();
-
-    for (uint i=0; i<n->outcnt(); i++) {
-      Node* m = n->raw_out(i);
-      ideal_nodes.push(m);
-    }
-  }
-
-  fstream.flush();
-
-  tty->print_cr("----------------------------------------");
-  tty->print_cr("Partial graph dumped to: %s", ss.as_string());
-
-  Atomic::inc(&counter);
-}
-
-/*
-static void save_partial_graph(Compile* comp, Node* phi) {
-  static int counter = 1;
-
-  // Only care for this method for now
-  if (strcmp(comp->method()->name()->as_utf8(), "testSpreadArguments") != 0) {
-    return ;
-  }
-
-  stringStream ss;
-  ss.print("/tmp/partial_graph__%d.ir", counter);
-  Unique_Node_List ideal_nodes;
-  fileStream fstream(ss.as_string());
-
-  ideal_nodes.push(phi);
-  for( uint next = 0; next < ideal_nodes.size() && next < 50; ++next ) {
-    Node* n = ideal_nodes.at(next);
-
-    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
-    fstream.cr();
-
-    for (uint i=0; i<n->outcnt(); i++) {
-      Node* m = n->raw_out(i);
-      ideal_nodes.push(m);
-    }
-  }
-
-  ideal_nodes.clear();
-  ideal_nodes.push(phi);
-  for( uint next = 0; next < ideal_nodes.size() && next < 50; ++next ) {
-    Node* n = ideal_nodes.at(next);
-
-    NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
-    fstream.cr();
-
-    for (uint i=0; i<n->req(); i++) {
-      Node* m = n->in(i);
-      ideal_nodes.push(m);
-    }
-  }
-
-  fstream.flush();
-
-  tty->print_cr("----------------------------------------");
-  tty->print_cr("Partial graph dumped to: %s", ss.as_string());
-
-  Atomic::inc(&counter);
-}
-*/
 
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
   // If ReduceAllocationMerges is enabled we might call split_through_phi during
@@ -629,12 +543,9 @@ bool ConnectionGraph::can_reduce_phi_check_users(Node* base, int nesting_level) 
 
         if (!cast_type->higher_equal(_igvn->type(base->in(i)))) {
           NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because cast is not to a subtype of input %d.", i);)
-          //tty->print("Cast: "); use->dump();
-          //tty->print("Base: "); base->in(i)->dump();
           return false;
         }
       }
-      tty->print_cr("Cast is fine.");
 
       if (!can_reduce_phi_check_users(use, nesting_level+1)) {
         return false;
@@ -1317,8 +1228,6 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_wo
   Unique_Node_List phi_users;
   PhiNode* selector = nullptr;
 
-  save_ophi_header_graph(_compile, ophi);
-
   bool delay = _igvn->delay_transform();
   _igvn->set_delay_transform(true);
   _igvn->hash_delete(ophi);
@@ -1352,8 +1261,6 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_wo
       return;
     }
   }
-
-  save_ophi_header_graph(_compile, ophi);
 
   _igvn->set_delay_transform(delay);
 }
