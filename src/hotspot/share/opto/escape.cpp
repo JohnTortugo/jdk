@@ -1272,6 +1272,7 @@ void ConnectionGraph::verify_ram_nodes(Compile* C, Node* root) {
           int merge_idx = merge->merge_pointer_idx(sfpt->as_SafePoint()->jvms());
 
           if (sfpt->in(merge_idx) != nullptr && sfpt->in(merge_idx)->is_SafePointScalarMerge()) {
+            sfpt->dump(2);
             assert(false, "SafePointScalarMerge nodes can't be nested.");
             C->record_failure(C2Compiler::retry_no_reduce_allocation_merges());
           }
