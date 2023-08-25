@@ -44,8 +44,6 @@
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
-
-
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
   // If ReduceAllocationMerges is enabled we might call split_through_phi during
   // split_unique_types and that will create additional nodes that need to be
@@ -404,8 +402,8 @@ bool ConnectionGraph::compute_escape() {
   // 6. Reduce allocation merges used as debug information. This is done after
   // split_unique_types because the methods used to create SafePointScalarObject
   // need to traverse the memory graph to find values for object fields. We also
-  // set to null the scalarized entries of reducible Phis so that the object
-  // that they use can be later scalar replaced.
+  // set to null the scalarized inputs of reducible Phis so that the Allocate
+  // that they point can be later scalar replaced.
   if (reducible_merges.size() > 0) {
     bool delay = _igvn->delay_transform();
     _igvn->set_delay_transform(true);
@@ -535,14 +533,15 @@ bool ConnectionGraph::can_reduce_phi_check_users(Node* base, int nesting_level) 
     } else if (use->is_CastPP() || use->is_CheckCastPP()) {
       const Type* cast_type = _igvn->type(use)->is_instptr()->cast_to_exactness(true);
 
-      // Make sure the cast is a downcast for all inputs of the Phi
+      // Make sure the cast is a upcast for all SR inputs of the Phi. This is necessary because we're going to put a clone
+      // of the cast right after SR inputs of the Phi when reducing the cast on field loads.
       for (uint i=1; i<base->req(); i++) {
         JavaObjectNode* ptn = unique_java_object(base->in(i));
         if (ptn == nullptr || !ptn->scalar_replaceable())
           continue;
 
         if (!cast_type->higher_equal(_igvn->type(base->in(i)))) {
-          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because cast is not to a subtype of input %d.", i);)
+          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because cast is not to a super type of input %d.", i);)
           return false;
         }
       }
@@ -653,6 +652,7 @@ void ConnectionGraph::reduce_phi_on_field_access(Node* previous_addp, GrowableAr
       _igvn->replace_node(previous_load, data_phi);
       assert(data_phi != nullptr, "Output of split_through_phi is null.");
       assert(data_phi != previous_load, "Output of split_through_phi is same as input.");
+      assert(data_phi->is_Phi(), "Output of split_through_phi isn't a Phi.");
 
       // Push the newly created AddP on alloc_worklist and patch
       // the connection graph. Note that the changes in the CG below
@@ -697,6 +697,7 @@ void ConnectionGraph::reduce_phi_on_field_access(Node* previous_addp, GrowableAr
   }
 
   // Remove the old AddP from the processing list because it's dead now
+  assert(previous_addp->outcnt() == 0, "AddP should be dead now.");
   alloc_worklist.remove_if_existing(previous_addp);
 }
 
@@ -813,7 +814,7 @@ bool ConnectionGraph::reduce_phi_on_safepoints_helper(Node* ophi, Node* cast, No
 // Because during the RAM process we insert new nodes in the IR graph we also
 // need to update the worklists that `split_unique_types` is using and also the
 // ConnectionGraph. This method takes care of all that.
-void ConnectionGraph::update_after_load_split(PhiNode* data_phi, AddPNode* previous_addp, LoadNode* previous_load,
+void ConnectionGraph::update_after_load_split(Node* data_phi, Node* previous_addp, Node* previous_load,
                                               GrowableArray<Node *>  &alloc_worklist,
                                               GrowableArray<Node *>  &memnode_worklist) {
   alloc_worklist.remove_if_existing(previous_addp);
@@ -858,9 +859,9 @@ void ConnectionGraph::update_after_load_split(PhiNode* data_phi, AddPNode* previ
         }
       }
 
-        // Push to alloc/memnode_worklist since the base has an unique_type
-        alloc_worklist.append_if_missing(new_addp);
-        memnode_worklist.append_if_missing(new_load);
+      // Push to alloc/memnode_worklist since the base has an unique_type
+      alloc_worklist.append_if_missing(new_addp);
+      memnode_worklist.append_if_missing(new_load);
 
       // Now let's add the node to the connection graph
       _nodes.at_grow(new_addp->_idx, nullptr);
@@ -882,17 +883,13 @@ void ConnectionGraph::update_after_load_split(PhiNode* data_phi, AddPNode* previ
 // This method will return a new PhiNode. The Phi inputs are clones of
 // 'nsr_load' for the SR inputs of 'ophi' and "Zero" for the NSR inputs of
 // 'ophi'.
-Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast, Node* selector) {
+Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast, Node* selector, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
   Node* address         = nsr_load->in(LoadNode::Address);
   Node* memory          = nsr_load->in(LoadNode::Memory);
   const Type* load_type = nsr_load->bottom_type();
   Node* nsr_value       = _igvn->zerocon(load_type->basic_type());
   Node* region          = ophi->in(0);
   Node* phi             = PhiNode::make(region, nsr_value, load_type);
-
-  //tty->print_cr("-----------------------------------------------------------------");
-  //tty->print_cr("ophi: " ); ophi->dump(1);
-  //tty->print_cr("cast: " ); if (cast != nullptr) cast->dump();
 
   for (uint i = 1; i < selector->req(); i++) {
     Node* in = region->in(i);
@@ -909,16 +906,14 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
       in = in->in(LoopNode::EntryControl);
     }
 
-    Node* base_for_sr_load = ophi->in(i);
-    Node* base             = base_for_sr_load;
-    JavaObjectNode* ptn    = unique_java_object(base);
-    AllocateNode* alloc    = ptn->ideal_node()->as_Allocate();
-
+    Node* base_for_sr_load       = ophi->in(i);
+    JavaObjectNode* ptn          = unique_java_object(base_for_sr_load);
+    AllocateNode* alloc          = ptn->ideal_node()->as_Allocate();
     const TypeOopPtr* cast_t     = _igvn->type(cast)->isa_oopptr();
     const TypeOopPtr* cast_tinst = cast_t->cast_to_exactness(true)->cast_to_instance_id(alloc->_idx);
 
     if (cast_tinst != _igvn->type(ophi->in(i))) {
-          base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), ophi->in(i)->in(0), ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
+      base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), ophi->in(i)->in(0), ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
     }
 
     Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
@@ -929,13 +924,13 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
       sr_load = sr_load->in(1);
     }
 
-    //tty->print("\t\tAddP: "); sr_load_addr->dump();
-    //tty->print("\t\tLoad: "); sr_load->dump(1);
-
     phi->set_req(i, sr_load);
   }
 
-  return _igvn->register_new_node_with_optimizer(phi);
+  // Update ConnectionGraph and split_unique_type worklists.
+  update_after_load_split(phi, address, nsr_load, alloc_worklist, memnode_worklist);
+
+  return phi;
 }
 
 // This method will process field loads that are under a CastPP or CheckCastPP.
@@ -950,15 +945,17 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
 //  under an IfNode and it's only executed if a NSR input of 'ophi' was
 //  selected.
 void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector, Node* cast, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
-    bool ophi_has_nsr_input = false;
-    for (uint i = 1; i < selector->req(); i++) {
-      Node* sel_in = selector->in(i);
+  bool ophi_has_nsr_input = false;
 
-      if (sel_in->as_ConI()->get_int() == -1) {
-        ophi_has_nsr_input = true;
-        break;
-      }
+  // If there is no NSR input much of the code later in this method is simplified.
+  for (uint i = 1; i < selector->req(); i++) {
+    Node* sel_in = selector->in(i);
+
+    if (sel_in->as_ConI()->get_int() == -1) {
+      ophi_has_nsr_input = true;
+      break;
     }
+  }
 
   Unique_Node_List processed_addps;
   for (int i = cast->outcnt()-1; i >= 0;) {
@@ -971,54 +968,40 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
         if (use_use->is_Load()) {
           _igvn->hash_delete(use_use);
 
-          Node* current_control = nullptr;
+          Node* current_control = use_use->in(0) != nullptr ? use_use->in(0) :
+                                     cast->in(0) != nullptr ?    cast->in(0) :
+                                     ophi->in(0);
 
-          if (use_use->in(0) != nullptr) {
-            current_control = use_use->in(0);
-          } else {
-            current_control = cast->in(0) != nullptr ? cast->in(0) : ophi->in(0);
-          }
-
-          // This is a Phi merging values loaded from SR inputs with *default* values for NSR inputs
-          Node* sr_value_phi = partial_load_split(use_use, ophi, cast, selector);
-
-          update_after_load_split(sr_value_phi->as_Phi(), use->as_AddP(), use_use->as_Load(), alloc_worklist, memnode_worklist);
+          // 'sr_value_phi' is a Phi merging values loaded from SR inputs with *default* values for NSR inputs
+          Node* sr_value_phi = partial_load_split(use_use, ophi, cast, selector, alloc_worklist, memnode_worklist);
 
           // This is the Phi merging the value loaded from the SR and NSR inputs
-          Node* final_phi = nullptr;
+          Node* final_phi = ophi_has_nsr_input ?
+                            create_if_on_selector(current_control, selector, use_use, cast, sr_value_phi) :
+                            sr_value_phi;
+
+          // Every node using result of current Load will now use the final phi
+          for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
+            Node *load_use = use_use->last_out(k);
+            _igvn->hash_delete(load_use);
+            int uses = load_use->replace_edge(use_use, final_phi);
+            assert(uses > 0, "sanity");
+            k -= uses;
+            _igvn->_worklist.push(load_use);
+            _igvn->hash_insert(load_use);
+          }
 
           if (ophi_has_nsr_input) {
-            // Create an IF comparing the result of selector
-            Node* yes_sr_control = nullptr;
-            Node* not_sr_control = nullptr;
-            Node* selector_if_region = nullptr;
-            create_if_on_selector(current_control, selector, &yes_sr_control, &not_sr_control, &selector_if_region);
-
-            Node* new_cast = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), not_sr_control, cast->in(1), _igvn->type(cast), ConstraintCastNode::UnconditionalDependency));
-            use->set_req(AddPNode::Base, new_cast);
-            use->set_req(AddPNode::Address, new_cast);
-
-            final_phi = PhiNode::make(selector_if_region, sr_value_phi, use_use->bottom_type());
-
-            // Every node using result of current Load will now use the final phi
-            for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
-              Node *load_use = use_use->last_out(k);
-              _igvn->hash_delete(load_use);
-              int uses = load_use->replace_edge(use_use, final_phi);
-              assert(uses > 0, "sanity");
-              k -= uses;
-              _igvn->_worklist.push(load_use);
-              _igvn->hash_insert(load_use);
-            }
-
             // The final Phi needs to load value from the NSR side
             final_phi->set_req(2, use_use);
 
+            // Push some nodes down in the control graph to make sure we don't "cross" the
+            // direction of data/control flow.
             for (DUIterator_Fast kmax, k = current_control->fast_outs(kmax); k < kmax; k++) {
               Node* use = current_control->fast_out(k);
               if (!use->is_CFG() && !use->is_Phi() && use != cast && use->in(0) != nullptr) {
                 _igvn->hash_delete(use);
-                use->set_req(0, selector_if_region);
+                use->set_req(0, final_phi->in(0));
                 _igvn->hash_insert(use);
                 _igvn->_worklist.push(use);
 
@@ -1027,28 +1010,16 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
               }
             }
 
-            _igvn->register_new_node_with_optimizer(final_phi);
+            _igvn->hash_insert(use_use);
+            _igvn->_worklist.push(use_use);
           } else {
-            final_phi = sr_value_phi;
-
-            // Every node using result of current Load will now use the final phi
-            for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
-              Node *load_use = use_use->last_out(k);
-              _igvn->hash_delete(load_use);
-              int uses = load_use->replace_edge(use_use, final_phi);
-              assert(uses > 0, "sanity");
-              k -= uses;
-              _igvn->_worklist.push(load_use);
-              _igvn->hash_insert(load_use);
-            }
-
             _igvn->remove_dead_node(use_use);
           }
 
-          _igvn->hash_insert(use_use);
-          _igvn->_worklist.push(use_use);
+          _igvn->register_new_node_with_optimizer(final_phi);
         }
       }
+
       _igvn->hash_insert(use);
       _igvn->_worklist.push(use);
 
@@ -1067,11 +1038,11 @@ void ConnectionGraph::reduce_cast_on_field_access(PhiNode* ophi, Node* selector,
 //
 //    - 'A' is a expression that returns TRUE if, during the execution of the
 //      method, the activated input of 'Ophi' is one for which we were able to
-//      prove, at compile time, that it is equal to 'other'.
+//      prove, at compile time, that it IS EQUAL to 'other'.
 //
 //    - 'B' is a expression that returns TRUE if, during the execution of the
 //      method, the activated input of 'Ophi' is one for which we were able to
-//      prove, at compile time, that it is NOT EQUAL to 'other'.
+//      prove, at compile time, that it IS NOT EQUAL to 'other'.
 //
 //    - 'C' is the result of `CmpP/N Ophi, other` but note that it will use a
 //      version of 'Ophi' where the scalar replaceable inputs are nullptr.
@@ -1130,23 +1101,30 @@ void ConnectionGraph::reduce_on_cmp(PhiNode* ophi, Node* selector, Node* cmp) {
 // Cmp/Bool condition used in the new IfNode is whether or not the output of the
 // 'selector' is '-1' - i.e., whether the executed input of 'Ophi' was
 // scalarized or not.
-void ConnectionGraph::create_if_on_selector(Node* current_control, Node* selector, Node** yes_sr_control, Node** not_sr_control, Node** selector_if_region) {
-  Node* control_successor = current_control->unique_ctrl_out();
-  Node* minus_one         = _igvn->transform(ConINode::make(-1));
-  Node* cmp               = _igvn->transform(new CmpINode(selector, minus_one));
-  Node* boll              = _igvn->transform(new BoolNode(cmp, BoolTest::ne));
-  IfNode* if_is_sr        = _igvn->transform(new IfNode(current_control, boll, PROB_MIN, COUNT_UNKNOWN))->as_If();
-  *yes_sr_control         = _igvn->transform(new IfTrueNode(if_is_sr));
-  *not_sr_control         = _igvn->transform(new IfFalseNode(if_is_sr));
-  *selector_if_region     = _igvn->transform(new RegionNode(3));
+Node* ConnectionGraph::create_if_on_selector(Node* current_control, Node* selector, Node* use_use, Node* cast, Node* sr_value_phi) {
+  Node* control_successor  = current_control->unique_ctrl_out();
+  Node* addp               = use_use->in(LoadNode::Address);
+  Node* minus_one          = _igvn->transform(ConINode::make(-1));
+  Node* cmp                = _igvn->transform(new CmpINode(selector, minus_one));
+  Node* boll               = _igvn->transform(new BoolNode(cmp, BoolTest::ne));
+  IfNode* if_is_sr         = _igvn->transform(new IfNode(current_control, boll, PROB_MIN, COUNT_UNKNOWN))->as_If();
+  Node* yes_sr_control     = _igvn->transform(new IfTrueNode(if_is_sr));
+  Node* not_sr_control     = _igvn->transform(new IfFalseNode(if_is_sr));
+  Node* selector_if_region = _igvn->transform(new RegionNode(3));
 
   // Insert the new if-else-region block into the graph
-  (*selector_if_region)->set_req(1, *yes_sr_control);
-  (*selector_if_region)->set_req(2, *not_sr_control);
-  control_successor->replace_edge(current_control, *selector_if_region, _igvn);
+  selector_if_region->set_req(1, yes_sr_control);
+  selector_if_region->set_req(2, not_sr_control);
+  control_successor->replace_edge(current_control, selector_if_region, _igvn);
 
   _igvn->_worklist.push(current_control);
   _igvn->_worklist.push(control_successor);
+
+  Node* new_cast = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), not_sr_control, cast->in(1), _igvn->type(cast), ConstraintCastNode::UnconditionalDependency));
+  addp->set_req(AddPNode::Base, new_cast);
+  addp->set_req(AddPNode::Address, new_cast);
+
+  return PhiNode::make(selector_if_region, sr_value_phi, use_use->bottom_type());
 }
 
 // Create a 'selector' Phi based on the inputs of 'ophi'. If index 'i' of the
@@ -1222,7 +1200,7 @@ void ConnectionGraph::reset_merge_entries(PhiNode* ophi) {
 // Reduce phi users that aren't related to debugging information:
 //   Field loads: will be reduced by calling 'split_through_phi'.
 //   CmpP/N: we'll resolve the comparison with scalar replaceable inputs
-//   statically so we can later remove them from the Phi.
+//           statically so we can later remove them from the Phi.
 //   CastPP/CheckCastPP: only field loads are reduced here.
 void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
   Unique_Node_List phi_users;
@@ -1233,7 +1211,7 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_wo
   _igvn->hash_delete(ophi);
 
   // Copying all users first because some will be removed and others won't.
-  // Ophi also may acquire some new users.
+  // Ophi also may acquire some new users as part of Cast reduction.
   for (DUIterator_Fast imax, i = ophi->fast_outs(imax); i < imax; i++) {
     Node* use = ophi->fast_out(i);
     phi_users.push(use);
@@ -1254,7 +1232,8 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_wo
       reduce_cast_on_field_access(ophi, selector, use, alloc_worklist, memnode_worklist);
     } else {
 #ifdef ASSERT
-      ophi->dump(-3);
+      ophi->dump(-1);
+      use->dump(-2);
       assert(false, "Unexpected user of reducible Phi %d -> %d:%s", ophi->_idx, use->_idx, use->Name());
 #endif
       _compile->record_failure(C2Compiler::retry_no_reduce_allocation_merges());

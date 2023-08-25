@@ -597,10 +597,10 @@ private:
   bool has_reducible_merge_base(AddPNode* n, Unique_Node_List &reducible_merges);
   BoolTest::mask static_cmpp_result(JavaObjectNode* sr_jobj, Node* other) const;
   void reset_merge_entries(PhiNode* ophi);
-  void create_if_on_selector(Node* current_control, Node* selector, Node** yes_sr_control, Node** not_sr_control, Node** selector_if_region);
+  Node* create_if_on_selector(Node* current_control, Node* selector, Node* use_use, Node* cast, Node* sr_value_phi);
   PhiNode* create_selector(PhiNode* ophi) const;
-  void update_after_load_split(PhiNode* data_phi, AddPNode* previous_addp, LoadNode* previous_load, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
-  Node* partial_load_split(Node* load, Node* ophi, Node* cast, Node* selector);
+  void update_after_load_split(Node* data_phi, Node* previous_addp, Node* previous_load, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
+  Node* partial_load_split(Node* load, Node* ophi, Node* cast, Node* selector, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
 
   void reduce_on_cmp(PhiNode* ophi, Node* selector, Node* cmp);
   void reduce_cast_on_field_access(PhiNode* ophi, Node* selector, Node* castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
