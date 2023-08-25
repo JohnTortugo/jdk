@@ -889,7 +889,7 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
   const Type* load_type = nsr_load->bottom_type();
   Node* nsr_value       = _igvn->zerocon(load_type->basic_type());
   Node* region          = ophi->in(0);
-  Node* phi             = PhiNode::make(region, nsr_value, load_type);
+  Node* phi             = _igvn->transform(PhiNode::make(region, nsr_value, load_type));
 
   for (uint i = 1; i < selector->req(); i++) {
     Node* in = region->in(i);
