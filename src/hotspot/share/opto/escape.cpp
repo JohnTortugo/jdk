@@ -407,7 +407,7 @@ bool ConnectionGraph::compute_escape() {
   if (reducible_merges.size() > 0) {
     bool delay = _igvn->delay_transform();
     _igvn->set_delay_transform(true);
-    for (uint i = 0; i < reducible_merges.size(); i++ ) {
+    for (uint i = 0; i < reducible_merges.size(); i++) {
       Node* n = reducible_merges.at(i);
       if (n->outcnt() > 0) {
         if (!reduce_phi_on_safepoints(n->as_Phi())) {
@@ -744,15 +744,9 @@ bool ConnectionGraph::reduce_phi_on_safepoints_helper(Node* ophi, Node* cast, No
   const TypeOopPtr* merge_t = _igvn->type(original_sfpt_parent)->make_oopptr();
 
   Node* nsr_merge_pointer = ophi;
-  if (cast != nullptr && (cast->is_CastPP() || cast->is_CheckCastPP())) {
-    const Type* new_t    = merge_t->meet(TypePtr::NULL_PTR);
-    if (new_t == _igvn->type(cast->in(1))) {
-      nsr_merge_pointer = cast->in(1);
-    } else {
-      nsr_merge_pointer = cast->clone();
-      nsr_merge_pointer->as_ConstraintCast()->set_type(new_t);
-      _igvn->transform(nsr_merge_pointer);
-    }
+  if (cast != nullptr) {
+    const Type* new_t = merge_t->meet(TypePtr::NULL_PTR);
+    nsr_merge_pointer = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), cast->in(0), cast->in(1), new_t, ConstraintCastNode::RegularDependency));
   }
 
   for (uint spi = 0; spi < safepoints.size(); spi++) {
