@@ -183,6 +183,11 @@ void NodeHash::hash_insert( Node *n ) {
     NOT_PRODUCT( _insert_probes++ );
     Node *k = _table[key];      // Get hashed value
     if( !k || (k == _sentinel) ) break;       // Found a slot
+    #ifdef ASSERT
+      if (k == n) {
+        tty->print("Node %d already in hash table", n->_idx); n->dump();
+      }
+    #endif
     assert( k != n, "already inserted" );
     // if( PrintCompilation && PrintOptoStatistics && Verbose ) { tty->print("  conflict: "); k->dump(); conflict = true; }
     key = (key + stride) & (_max-1); // Stride through table w/ relative prime

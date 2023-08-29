@@ -623,7 +623,8 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
   }
 
   const Type* phi_t = _igvn->type(ophi);
-  if (phi_t == nullptr || !phi_t->isa_oop_ptr()) {
+  if (phi_t == nullptr || phi_t->make_ptr() == nullptr ||
+                          phi_t->make_ptr()->isa_instptr() == nullptr) {
     return false;
   }
 
