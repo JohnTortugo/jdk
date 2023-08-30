@@ -564,11 +564,10 @@ tier2 = \
   :tier2_gc_shenandoah
 
 tier3 = \
-  compiler/codecache/stress/OverloadCompileQueueTest.java
-#  :hotspot_tier3_runtime \
-#  :tier3_compiler \
-#  :tier3_gc_gcold \
-#  :tier3_gc_shenandoah
+  :hotspot_tier3_runtime \
+  :tier3_compiler \
+  :tier3_gc_gcold \
+  :tier3_gc_shenandoah
 
 # Everything that is not in other tiers, but not apps
 tier4 = \
