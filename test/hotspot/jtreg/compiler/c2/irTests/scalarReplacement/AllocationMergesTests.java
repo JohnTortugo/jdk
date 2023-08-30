@@ -553,7 +553,7 @@ public class AllocationMergesTests {
             new F();
         }
 
-	int res = s.a;
+        int res = s.a;
         dummy();
 
         return res;
@@ -1197,7 +1197,7 @@ public class AllocationMergesTests {
             global_escape = p;
         }
 
-	int res = p.x;
+        int res = p.x;
         if (is_c2) {
             // This will show up to C2 as a trap.
             dummy_defaults();

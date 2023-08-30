@@ -619,7 +619,8 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
   // method we might have disabled the compilation and be retrying with RAM
   // disabled.
   // If EliminateAllocations is False, there is no point in reducing merges.
-  // For now we only do RAM in the first invocation so that we don't create nested SafePointScalarMergedObjects.
+  // For now we only do RAM in the first invocation so that we don't create 
+  // nested SafePointScalarMergedObjects.
   if (!_compile->do_reduce_allocation_merges() || _invocation > 0) {
     return false;
   }
@@ -634,7 +635,7 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
     return false;
   }
 
-  NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("%s) Can reduce Phi %d during invocation %d: ", _compile->method()->name()->as_utf8(), ophi->_idx, _invocation); })
+  NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("Can reduce Phi %d during invocation %d: ", ophi->_idx, _invocation); })
   return true;
 }
 
