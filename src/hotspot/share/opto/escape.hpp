@@ -596,17 +596,16 @@ private:
 
   bool has_reducible_merge_base(AddPNode* n, Unique_Node_List &reducible_merges);
   BoolTest::mask static_cmpp_result(JavaObjectNode* sr_jobj, Node* other) const;
-  void reset_merge_entries(PhiNode* ophi);
-  Node* create_if_on_selector(Node* current_control, Node* selector, Node* use_use, Node* cast, Node* sr_value_phi);
+  void reset_scalar_replaceable_entries(PhiNode* ophi);
+  Node* specialize_cast_as_nsr(Node* current_control, Node* selector, Node* use_use, Node* cast, Node* sr_value_phi);
   PhiNode* create_selector(PhiNode* ophi) const;
-  void update_after_load_split(Node* data_phi, Node* previous_addp, Node* previous_load, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
+  void update_after_partial_load_split(Node* data_phi, Node* previous_addp, Node* previous_load, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
   Node* partial_load_split(Node* load, Node* ophi, Node* cast, Node* selector, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
 
-  void reduce_on_cmp(PhiNode* ophi, Node* selector, Node* cmp);
-  void reduce_cast_on_field_access(PhiNode* ophi, Node* selector, Node* castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
-
   bool reduce_phi_on_safepoints_helper(Node* ophi, Node* cast, Node* selector, Unique_Node_List& safepoints);
+  void reduce_phi_on_cast_field_access(PhiNode* ophi, Node* selector, Node* castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
   void reduce_phi_on_field_access(Node* previous_addp, GrowableArray<Node *>  &alloc_worklist);
+  void reduce_phi_on_cmp(PhiNode* ophi, Node* selector, Node* cmp);
   bool reduce_phi_on_safepoints(PhiNode* ophi);
   void reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
 
