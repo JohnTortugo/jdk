@@ -43,9 +43,6 @@ public class AllocationMergesTests {
                                    "-XX:+ReduceAllocationMerges",
                                    "-XX:+TraceReduceAllocationMerges",
                                    "-XX:+DeoptimizeALot",
-                                   "-XX:CompileCommand=inline,*::charAt*",
-                                   "-XX:CompileCommand=inline,*PicturePositions::*",
-                                   "-XX:CompileCommand=inline,*Point::*",
                                    "-XX:CompileCommand=exclude,*::dummy*");
     }
 
@@ -95,11 +92,9 @@ public class AllocationMergesTests {
                  "testString_two_C2"
                 })
     public void runner(RunInfo info) {
-        invocations++;
-
         Random random = info.getRandom();
-        boolean cond1 = invocations % 2 == 0;
-        boolean cond2 = !cond1;
+        boolean cond1 = random.nextBoolean();
+        boolean cond2 = random.nextBoolean();
 
         int l = random.nextInt();
         int w = random.nextInt();
@@ -295,8 +290,7 @@ public class AllocationMergesTests {
     }
 
     @Test
-    @IR(counts = { IRNode.ALLOC, "2" })
-    // Merge won't be reduced because the inputs to the Phi have different Klasses
+    @IR(failOn = { IRNode.ALLOC })
     int testPollutedPolymorphic_C2(boolean cond, int l) { return testPollutedPolymorphic(cond, l); }
 
     @DontCompile
@@ -404,8 +398,7 @@ public class AllocationMergesTests {
     }
 
     @Test
-    @IR(counts = { IRNode.ALLOC, "1" })
-    // The merge won't be simplified because the merge with NULL
+    @IR(failOn = { IRNode.ALLOC })
     int testCondAfterMergeWithNull_C2(boolean cond1, boolean cond2, int x, int y) { return testCondAfterMergeWithNull(cond1, cond2, x, y); }
 
     @DontCompile
@@ -531,8 +524,7 @@ public class AllocationMergesTests {
     }
 
     @Test
-    @IR(counts = { IRNode.ALLOC, "1" })
-    // The allocation won't be removed because the merge doesn't have exact type
+    @IR(failOn = { IRNode.ALLOC })
     int testObjectIdentity_C2(boolean cond, int x, int y) { return testObjectIdentity(cond, x, y); }
 
     @DontCompile
@@ -556,10 +548,9 @@ public class AllocationMergesTests {
             new F();
         }
 
-        int res = s.a;
         dummy();
 
-        return res;
+        return s.a;
     }
 
     @Test
@@ -591,7 +582,7 @@ public class AllocationMergesTests {
     }
 
     @Test
-    @IR(counts = { IRNode.ALLOC, "2" })
+    @IR(failOn = { IRNode.ALLOC })
     int testCmpMergeWithNull_C2(boolean cond, int x, int y) { return testCmpMergeWithNull(cond, x, y); }
 
     @DontCompile
@@ -621,9 +612,7 @@ public class AllocationMergesTests {
     }
 
     @Test
-    @IR(counts = { IRNode.ALLOC, "2" })
-    // The unused allocation will be removed.
-    // The other two allocations assigned to 's' won't be removed because they have different type.
+    @IR(failOn = { IRNode.ALLOC })
     int testSubclasses_C2(boolean c1, boolean c2, int x, int y, int w, int z) { return testSubclasses(c1, c2, x, y, w, z); }
 
     @DontCompile
@@ -1202,13 +1191,12 @@ public class AllocationMergesTests {
             global_escape = p;
         }
 
-        int res = p.x;
         if (is_c2) {
             // This will show up to C2 as a trap.
             dummy_defaults();
         }
 
-        return res;
+        return p.y;
     }
 
     @Test

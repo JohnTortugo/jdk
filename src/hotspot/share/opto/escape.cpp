@@ -39,6 +39,8 @@
 #include "opto/macro.hpp"
 #include "opto/phaseX.hpp"
 #include "opto/movenode.hpp"
+#include "opto/narrowptrnode.hpp"
+#include "opto/castnode.hpp"
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
@@ -397,16 +399,26 @@ bool ConnectionGraph::compute_escape() {
 #endif
   }
 
-  // 6. Remove reducible allocation merges from ideal graph
+  // 6. Reduce allocation merges used as debug information. This is done after
+  // split_unique_types because the methods used to create SafePointScalarObject
+  // need to traverse the memory graph to find values for object fields. We also
+  // set to null the scalarized inputs of reducible Phis so that the Allocate
+  // that they point can be later scalar replaced.
   if (reducible_merges.size() > 0) {
     bool delay = _igvn->delay_transform();
     _igvn->set_delay_transform(true);
-    for (uint i = 0; i < reducible_merges.size(); i++ ) {
+    for (uint i = 0; i < reducible_merges.size(); i++) {
       Node* n = reducible_merges.at(i);
-      reduce_phi(n->as_Phi());
-      if (C->failing()) {
-        NOT_PRODUCT(escape_state_statistics(java_objects_worklist);)
-        return false;
+      if (n->outcnt() > 0) {
+        if (!reduce_phi_on_safepoints(n->as_Phi())) {
+          NOT_PRODUCT(escape_state_statistics(java_objects_worklist);)
+          C->record_failure(C2Compiler::retry_no_reduce_allocation_merges());
+          return false;
+        }
+
+        // Now we set the scalar replaceable inputs of ophi to null, which is
+        // the last piece that would prevent it from being scalar replaceable.
+        reset_scalar_replaceable_entries(n->as_Phi());
       }
     }
     _igvn->set_delay_transform(delay);
@@ -434,22 +446,12 @@ bool ConnectionGraph::compute_escape() {
   return has_non_escaping_obj;
 }
 
-// Check if it's profitable to reduce the Phi passed as parameter.  Returns true
-// if at least one scalar replaceable allocation participates in the merge and
-// no input to the Phi is nullable.
+// Check if it's profitable to reduce the Phi passed as parameter. Returns true
+// if at least one scalar replaceable allocation participates in the merge.
 bool ConnectionGraph::can_reduce_phi_check_inputs(PhiNode* ophi) const {
-  // Check if there is a scalar replaceable allocate in the Phi
   bool found_sr_allocate = false;
 
   for (uint i = 1; i < ophi->req(); i++) {
-    // Right now we can't restore a "null" pointer during deoptimization
-    const Type* inp_t = _igvn->type(ophi->in(i));
-    if (inp_t == nullptr || inp_t->make_oopptr() == nullptr || inp_t->make_oopptr()->maybe_null()) {
-      NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. Input %d is nullable.", ophi->_idx, _invocation, i);)
-      return false;
-    }
-
-    // We are looking for at least one SR object in the merge
     JavaObjectNode* ptn = unique_java_object(ophi->in(i));
     if (ptn != nullptr && ptn->scalar_replaceable()) {
       assert(ptn->ideal_node() != nullptr && ptn->ideal_node()->is_Allocate(), "sanity");
@@ -458,6 +460,7 @@ bool ConnectionGraph::can_reduce_phi_check_inputs(PhiNode* ophi) const {
       if (PhaseMacroExpand::can_eliminate_allocation(_igvn, alloc, nullptr)) {
         found_sr_allocate = true;
       } else {
+        NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("%dth input of Phi %d is SR but can't be eliminated.", i, ophi->_idx);)
         ptn->set_scalar_replaceable(false);
       }
     }
@@ -467,33 +470,144 @@ bool ConnectionGraph::can_reduce_phi_check_inputs(PhiNode* ophi) const {
   return found_sr_allocate;
 }
 
-// Check if we are able to untangle the merge. Right now we only reduce Phis
-// which are only used as debug information.
-bool ConnectionGraph::can_reduce_phi_check_users(PhiNode* ophi) const {
-  for (DUIterator_Fast imax, i = ophi->fast_outs(imax); i < imax; i++) {
-    Node* use = ophi->fast_out(i);
+// Check if we are able to untangle the merge. This is a recursive method. The
+// supported use patterns of Phis are the following:
+// Phi -> AddP -> LoadX
+// Phi -> SafePoint (as debug use)
+// Phi -> CmpP/N (and we can prove the outcome at compile time)
+// Phi -> CastPP/CheckCastPP
+//           -> AddP -> LoadX
+//           -> SafePoint (as debug use)
+bool ConnectionGraph::can_reduce_phi_check_users(Node* base, int nesting_level) const {
+  for (DUIterator_Fast imax, i = base->fast_outs(imax); i < imax; i++) {
+    Node* use = base->fast_out(i);
 
     if (use->is_SafePoint()) {
-      if (use->is_Call() && use->as_Call()->has_non_debug_use(ophi)) {
-        NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. Call has non_debug_use().", ophi->_idx, _invocation);)
+      if (use->is_Call() && use->as_Call()->has_non_debug_use(base)) {
+        NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because %s at nesting level %d has Call with non_debug_use().", base->Name(), nesting_level);)
         return false;
       }
     } else if (use->is_AddP()) {
-      Node* addp = use;
-      for (DUIterator_Fast jmax, j = addp->fast_outs(jmax); j < jmax; j++) {
-        Node* use_use = addp->fast_out(j);
-        if (!use_use->is_Load() || !use_use->as_Load()->can_split_through_phi_base(_igvn)) {
-          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. AddP user isn't a [splittable] Load(): %s", ophi->_idx, _invocation, use_use->Name());)
+      if (use->in(AddPNode::Offset)->find_intptr_t_con(-1) == -1) {
+        NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because AddP's offset at nesting level %d is not constant.", nesting_level);)
+        return false;
+      }
+
+      for (DUIterator_Fast jmax, j = use->fast_outs(jmax); j < jmax; j++) {
+        Node* use_use = use->fast_out(j);
+        if (!use_use->is_Load()) {
+          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because AddP user at nesting level %d is not a Load, it's a %s", nesting_level, use_use->Name());)
+          return false;
+        } else if (!use_use->as_Load()->can_split_through_phi_base(_igvn)) {
+          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because AddP.Load at nesting level %d is not splittable.", nesting_level);)
+          return false;
+        } else if (use_use->as_Load()->control_dependency() != LoadNode::ControlDependency::DependsOnlyOnTest) {
+          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because AddP.Load at nesting level %d NOT depends only on test.", nesting_level);)
           return false;
         }
       }
+    } else if (nesting_level > 0) {
+      NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because one of the uses at nesting level %d is a %s", nesting_level, use->Name());)
+      return false;
+    // The cases below are only supported at nesting_level == 0
+    } else if (use->Opcode() == Op_CmpP || use->Opcode() == Op_CmpN) {
+      Node* other = (use->in(1) == base) ? use->in(2) : use->in(1);
+
+      // Try to prove that the CmpP/CmpN comparing the output of the Phi is
+      // EQ/NE to the scalar replaceable allocations.
+      bool can_prove = true;
+      for (uint i = 1; i < base->req(); i++) {
+        JavaObjectNode* sr_obj = unique_java_object(base->in(i));
+        if (sr_obj != nullptr && sr_obj->scalar_replaceable()) {
+          BoolTest::mask cmp_result = static_cmpp_result(sr_obj, other);
+          if (cmp_result == BoolTest::illegal) {
+            can_prove = false;
+            break;
+          }
+        }
+      }
+
+      if (!can_prove) {
+        NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because cannot prove result of CmpP/N.");)
+        return false;
+      }
+    } else if (use->is_CastPP() || use->is_CheckCastPP()) {
+      // cast_to_exactness is necessary because SR allocations are always exact.
+      const Type* cast_type = _igvn->type(use)->is_instptr()->cast_to_exactness(true);
+
+      // Make sure the cast is a upcast for all SR inputs of the Phi. This is necessary because we're going to put a clone
+      // of the cast right after SR inputs of the Phi when reducing the cast on field loads.
+      for (uint i=1; i<base->req(); i++) {
+        JavaObjectNode* ptn = unique_java_object(base->in(i));
+        if (ptn == nullptr || !ptn->scalar_replaceable())
+          continue;
+
+        if (!cast_type->higher_equal(_igvn->type(base->in(i)))) {
+          NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because cast is not to a super type of input %d.", i);)
+          return false;
+        }
+      }
+
+      if (!can_reduce_phi_check_users(use, nesting_level+1)) {
+        return false;
+      }
     } else {
-      NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. One of the uses is: %d %s", ophi->_idx, _invocation, use->_idx, use->Name());)
+      NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce because one of the uses is a %s", use->Name());)
       return false;
     }
   }
 
   return true;
+}
+
+// Returns true if the AddP node 'n' has at least one base that is a reducible
+// merge. If the base is a CastPP/CheckCastPP then the input of the cast is
+// checked instead.
+bool ConnectionGraph::has_reducible_merge_base(AddPNode* n, Unique_Node_List &reducible_merges) {
+  PointsToNode* ptn = ptnode_adr(n->_idx);
+  if (ptn == nullptr || !ptn->is_Field() || ptn->as_Field()->base_count() < 2) {
+    return false;
+  }
+
+  for (BaseIterator i(ptn->as_Field()); i.has_next(); i.next()) {
+    Node* base = i.get()->ideal_node();
+
+    if (reducible_merges.member(base)) {
+      return true;
+    }
+
+    if (base->is_CastPP() || base->is_CheckCastPP()) {
+      base = base->in(1);
+      if (reducible_merges.member(base)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// Checks if 'other' is the Allocate object pointed by 'sr_jobj'. 'sr_jobj' is a
+// scalar replaceable Allocate and we leverage that information to help decide
+// the result of the comparison.
+BoolTest::mask ConnectionGraph::static_cmpp_result(JavaObjectNode* sr_jobj, Node* other) const {
+  PointsToNode* other_ptn = ptnode_adr(other->_idx);
+  JavaObjectNode* other_jobj = unique_java_object(other);
+  Node* sr_node = sr_jobj->ideal_node();
+
+  if (other->is_Con()) {
+    return BoolTest::ne;
+  } else if (other_jobj == nullptr) {
+    return BoolTest::illegal;
+  } else if (sr_jobj == other_jobj) {
+    return BoolTest::eq;
+  } else if (sr_node != other_jobj->ideal_node()) {
+    return BoolTest::ne;
+  } else if (sr_jobj->meet(other_ptn)) {
+    return BoolTest::illegal;
+  } else {
+    return BoolTest::ne;
+  }
 }
 
 // Returns true if: 1) It's profitable to reduce the merge, and 2) The Phi is
@@ -505,15 +619,14 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
   // method we might have disabled the compilation and be retrying with RAM
   // disabled.
   // If EliminateAllocations is False, there is no point in reducing merges.
-  if (!_compile->do_reduce_allocation_merges()) {
+  // For now we only do RAM in the first invocation so that we don't create nested SafePointScalarMergedObjects.
+  if (!_compile->do_reduce_allocation_merges() || _invocation > 0) {
     return false;
   }
 
   const Type* phi_t = _igvn->type(ophi);
   if (phi_t == nullptr || phi_t->make_ptr() == nullptr ||
-                          phi_t->make_ptr()->isa_instptr() == nullptr ||
-                          !phi_t->make_ptr()->isa_instptr()->klass_is_exact()) {
-    NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("Can NOT reduce Phi %d during invocation %d because it's nullable.", ophi->_idx, _invocation); })
+                          phi_t->make_ptr()->isa_instptr() == nullptr) {
     return false;
   }
 
@@ -521,121 +634,125 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
     return false;
   }
 
-  NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("Can reduce Phi %d during invocation %d: ", ophi->_idx, _invocation); })
+  NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("%s) Can reduce Phi %d during invocation %d: ", _compile->method()->name()->as_utf8(), ophi->_idx, _invocation); })
   return true;
 }
 
-void ConnectionGraph::reduce_phi_on_field_access(PhiNode* ophi, GrowableArray<Node *>  &alloc_worklist) {
+void ConnectionGraph::reduce_phi_on_field_access(Node* previous_addp, GrowableArray<Node *>  &alloc_worklist) {
   // We'll pass this to 'split_through_phi' so that it'll do the split even
   // though the load doesn't have an unique instance type.
   bool ignore_missing_instance_id = true;
 
-  // Iterate over Phi outputs looking for an AddP
-  for (int j = ophi->outcnt()-1; j >= 0;) {
-    Node* previous_addp = ophi->raw_out(j);
-    uint num_edges = 1;
-    if (previous_addp->is_AddP()) {
-      // All AddPs are present in the connection graph
-      FieldNode* fn = ptnode_adr(previous_addp->_idx)->as_Field();
-      num_edges = previous_addp->in(AddPNode::Address) == previous_addp->in(AddPNode::Base) ? 2 : 1;
+  // All AddPs are present in the connection graph
+  FieldNode* fn = ptnode_adr(previous_addp->_idx)->as_Field();
 
-      // Iterate over AddP looking for a Load
-      for (int k = previous_addp->outcnt()-1; k >= 0;) {
-        Node* previous_load = previous_addp->raw_out(k);
-        if (previous_load->is_Load()) {
-          Node* data_phi = previous_load->as_Load()->split_through_phi(_igvn, ignore_missing_instance_id);
-          _igvn->replace_node(previous_load, data_phi);
-          assert(data_phi != nullptr, "Output of split_through_phi is null.");
-          assert(data_phi != previous_load, "Output of split_through_phi is same as input.");
+  // Iterate over AddP looking for a Load
+  for (int k = previous_addp->outcnt()-1; k >= 0;) {
+    Node* previous_load = previous_addp->raw_out(k);
+    if (previous_load->is_Load()) {
+      Node* data_phi = previous_load->as_Load()->split_through_phi(_igvn, ignore_missing_instance_id);
+      _igvn->replace_node(previous_load, data_phi);
+      assert(data_phi != nullptr, "Output of split_through_phi is null.");
+      assert(data_phi != previous_load, "Output of split_through_phi is same as input.");
+      assert(data_phi->is_Phi(), "Output of split_through_phi isn't a Phi.");
 
-          // Push the newly created AddP on alloc_worklist and patch
-          // the connection graph. Note that the changes in the CG below
-          // won't affect the ES of objects since the new nodes have the
-          // same status as the old ones.
-          if (data_phi != nullptr && data_phi->is_Phi()) {
-            for (uint i = 1; i < data_phi->req(); i++) {
-              Node* new_load = data_phi->in(i);
-              if (new_load->is_Load()) {
-                Node* new_addp = new_load->in(MemNode::Address);
-                Node* base = get_addp_base(new_addp);
+      // Push the newly created AddP on alloc_worklist and patch
+      // the connection graph. Note that the changes in the CG below
+      // won't affect the ES of objects since the new nodes have the
+      // same status as the old ones.
+      if (data_phi != nullptr && data_phi->is_Phi()) {
+        for (uint i = 1; i < data_phi->req(); i++) {
+          Node* new_load = data_phi->in(i);
+          if (new_load->is_Load()) {
+            Node* new_addp = new_load->in(MemNode::Address);
+            Node* base = get_addp_base(new_addp);
 
-                // The base might not be something that we can create an unique
-                // type for. If that's the case we are done with that input.
-                PointsToNode* jobj_ptn = unique_java_object(base);
-                if (jobj_ptn == nullptr || !jobj_ptn->scalar_replaceable()) {
-                  continue;
-                }
+            // The base might not be something that we can create an unique
+            // type for. If that's the case we are done with that input.
+            PointsToNode* jobj_ptn = unique_java_object(base);
+            if (jobj_ptn == nullptr || !jobj_ptn->scalar_replaceable()) {
+              continue;
+            }
 
-                // Push to alloc_worklist since the base has an unique_type
-                alloc_worklist.append_if_missing(new_addp);
+            // Push to alloc_worklist since the base has an unique_type
+            alloc_worklist.append_if_missing(new_addp);
 
-                // Now let's add the node to the connection graph
-                _nodes.at_grow(new_addp->_idx, nullptr);
-                add_field(new_addp, fn->escape_state(), fn->offset());
-                add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptnode_adr(base->_idx));
+            // Now let's add the node to the connection graph
+            _nodes.at_grow(new_addp->_idx, nullptr);
+            add_field(new_addp, fn->escape_state(), fn->offset());
+            add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptnode_adr(base->_idx));
 
-                // If the load doesn't load an object then it won't be
-                // part of the connection graph
-                PointsToNode* curr_load_ptn = ptnode_adr(previous_load->_idx);
-                if (curr_load_ptn != nullptr) {
-                  _nodes.at_grow(new_load->_idx, nullptr);
-                  add_local_var(new_load, curr_load_ptn->escape_state());
-                  add_edge(ptnode_adr(new_load->_idx), ptnode_adr(new_addp->_idx)->as_Field());
-                }
-              }
+            // If the load doesn't load an object then it won't be
+            // part of the connection graph
+            PointsToNode* curr_load_ptn = ptnode_adr(previous_load->_idx);
+            if (curr_load_ptn != nullptr) {
+              _nodes.at_grow(new_load->_idx, nullptr);
+              add_local_var(new_load, curr_load_ptn->escape_state());
+              add_edge(ptnode_adr(new_load->_idx), ptnode_adr(new_addp->_idx)->as_Field());
             }
           }
         }
-        --k;
-        k = MIN2(k, (int)previous_addp->outcnt()-1);
       }
-
-      // Remove the old AddP from the processing list because it's dead now
-      alloc_worklist.remove_if_existing(previous_addp);
     }
-    j -= num_edges;
-    j = MIN2(j, (int)ophi->outcnt()-1);
+    --k;
+    k = MIN2(k, (int)previous_addp->outcnt()-1);
   }
+
+  // Remove the old AddP from the processing list because it's dead now
+  assert(previous_addp->outcnt() == 0, "AddP should be dead now.");
+  alloc_worklist.remove_if_existing(previous_addp);
 }
 
-// This method will create a SafePointScalarObjectNode for each combination of
-// scalar replaceable allocation in 'ophi' and SafePoint node in 'safepoints'.
-// The method will create a SafePointScalarMERGEnode for each combination of
-// 'ophi' and SafePoint node in 'safepoints'.
-// Each SafePointScalarMergeNode created here may describe multiple scalar
-// replaced objects - check detailed description in SafePointScalarMergeNode
-// class header.
-//
-// This method will set entries in the Phi that are scalar replaceable to 'null'.
-void ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi, Unique_Node_List* safepoints) {
-  Node* minus_one           = _igvn->register_new_node_with_optimizer(ConINode::make(-1));
-  Node* selector            = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), minus_one, TypeInt::INT));
-  Node* null_ptr            = _igvn->makecon(TypePtr::NULL_PTR);
-  const TypeOopPtr* merge_t = _igvn->type(ophi)->make_oopptr();
-  uint number_of_sr_objects = 0;
-  PhaseMacroExpand mexp(*_igvn);
+// This method will call its helper method to reduce SafePoint nodes that use
+// 'ophi' or a casted version of 'ophi'.  All SafePoint nodes using the same
+// "version" of Phi use the same debug information (regarding the Phi).
+// Therefore, I collect all safepoints and patch them all at once.
+bool ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi) {
+  Unique_Node_List safepoints;
+  PhiNode* selector = create_selector(ophi);
 
-  _igvn->hash_delete(ophi);
+  uint outcnt = ophi->outcnt();
+  for (uint i = 0; i < outcnt; i++) {
+    Node* use = ophi->raw_out(i);
+    if (use->is_SafePoint()) {
+      safepoints.push(use);
+    } else if (use->is_CastPP() || use->is_CheckCastPP()) {
+      Unique_Node_List child_sfpts;
 
-  // Fill in the 'selector' Phi. If index 'i' of the selector is:
-  // -> a '-1' constant, the i'th input of the original Phi is NSR.
-  // -> a 'x' constant >=0, the i'th input of of original Phi will be SR and the
-  //    info about the scalarized object will be at index x of
-  //    ObjectMergeValue::possible_objects
-  for (uint i = 1; i < ophi->req(); i++) {
-    Node* base          = ophi->in(i);
-    JavaObjectNode* ptn = unique_java_object(base);
+      for (DUIterator_Fast jmax, j = use->fast_outs(jmax); j < jmax; j++) {
+        Node* use_use = use->fast_out(j);
+        if (use_use->is_SafePoint()) {
+          child_sfpts.push(use_use);
+        }
+      }
 
-    if (ptn != nullptr && ptn->scalar_replaceable()) {
-      Node* sr_obj_idx = _igvn->register_new_node_with_optimizer(ConINode::make(number_of_sr_objects));
-      selector->set_req(i, sr_obj_idx);
-      number_of_sr_objects++;
+      if (!reduce_phi_on_safepoints_helper(ophi, use, selector, child_sfpts)) {
+        return false;
+      }
     }
   }
 
-  // Update the debug information of all safepoints in turn
-  for (uint spi = 0; spi < safepoints->size(); spi++) {
-    SafePointNode* sfpt = safepoints->at(spi)->as_SafePoint();
+  return reduce_phi_on_safepoints_helper(ophi, nullptr, selector, safepoints);
+}
+
+// This method will create a SafePointScalarMERGEnode for each SafePoint in
+// 'safepoints'. It then will iterate on the inputs of 'ophi' and create a
+// SafePointScalarObjectNode for each scalar replaceable input. Each
+// SafePointScalarMergeNode may describe multiple scalar replaced objects -
+// check detailed description in SafePointScalarMergeNode class header.
+bool ConnectionGraph::reduce_phi_on_safepoints_helper(Node* ophi, Node* cast, Node* selector, Unique_Node_List& safepoints) {
+  PhaseMacroExpand mexp(*_igvn);
+  Node* original_sfpt_parent =  cast != nullptr ? cast : ophi;
+  const TypeOopPtr* merge_t = _igvn->type(original_sfpt_parent)->make_oopptr();
+
+  Node* nsr_merge_pointer = ophi;
+  if (cast != nullptr) {
+    const Type* new_t = merge_t->meet(TypePtr::NULL_PTR);
+    nsr_merge_pointer = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), cast->in(0), cast->in(1), new_t, ConstraintCastNode::RegularDependency));
+  }
+
+  for (uint spi = 0; spi < safepoints.size(); spi++) {
+    SafePointNode* sfpt = safepoints.at(spi)->as_SafePoint();
     JVMState *jvms      = sfpt->jvms();
     uint merge_idx      = (sfpt->req() - jvms->scloff());
     int debug_start     = jvms->debug_start();
@@ -649,7 +766,7 @@ void ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi, Unique_Node_List* 
     //  (2) A selector, used to decide if we need to rematerialize an object
     //      or use the pointer to a NSR object.
     // See more details of these fields in the declaration of SafePointScalarMergeNode
-    sfpt->add_req(ophi);
+    sfpt->add_req(nsr_merge_pointer);
     sfpt->add_req(selector);
 
     for (uint i = 1; i < ophi->req(); i++) {
@@ -665,8 +782,7 @@ void ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi, Unique_Node_List* 
       AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
       SafePointScalarObjectNode* sobj = mexp.create_scalarized_object_description(alloc, sfpt);
       if (sobj == nullptr) {
-        _compile->record_failure(C2Compiler::retry_no_reduce_allocation_merges());
-        return;
+        return false;
       }
 
       // Now make a pass over the debug information replacing any references
@@ -678,20 +794,368 @@ void ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi, Unique_Node_List* 
       smerge->add_req(sobj);
     }
 
-    // Replaces debug information references to "ophi" in "sfpt" with references to "smerge"
-    sfpt->replace_edges_in_range(ophi, smerge, debug_start, jvms->debug_end(), _igvn);
+    // Replaces debug information references to "original_sfpt_parent" in "sfpt" with references to "smerge"
+    sfpt->replace_edges_in_range(original_sfpt_parent, smerge, debug_start, jvms->debug_end(), _igvn);
 
     // The call to 'replace_edges_in_range' above might have removed the
     // reference to ophi that we need at _merge_pointer_idx. The line below make
     // sure the reference is maintained.
-    sfpt->set_req(smerge->merge_pointer_idx(jvms), ophi);
+    sfpt->set_req(smerge->merge_pointer_idx(jvms), nsr_merge_pointer);
     _igvn->_worklist.push(sfpt);
   }
 
-  // Now we can change ophi since we don't need to know the types
-  // of the input allocations anymore.
-  const Type* new_t = merge_t->meet(TypePtr::NULL_PTR);
-  Node* new_phi = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), null_ptr, new_t));
+  return true;
+}
+
+// Because during the RAM process we insert new nodes in the IR graph we also
+// need to update the worklists that `split_unique_types` is using and also the
+// ConnectionGraph. This method takes care of all that.
+void ConnectionGraph::update_after_partial_load_split(Node* data_phi, Node* previous_addp, Node* previous_load,
+                                              GrowableArray<Node *>  &alloc_worklist,
+                                              GrowableArray<Node *>  &memnode_worklist) {
+  alloc_worklist.remove_if_existing(previous_addp);
+  memnode_worklist.remove_if_existing(previous_load);
+
+  // Push the newly created AddP+Load on alloc/memnode_worklist and patch the
+  // connection graph. Note that the changes in the CG below won't affect the
+  // ES of objects since the new nodes have the same status as the old ones.
+  for (uint i = 1; i < data_phi->req(); i++) {
+    Node *new_load = data_phi->in(i);
+    if (new_load->is_Load()) {
+      FieldNode *field_node = ptnode_adr(previous_addp->_idx)->as_Field();
+      Node *new_addp = new_load->in(MemNode::Address);
+      Node *base = get_addp_base(new_addp);
+
+      // If the base wasn't in the connection graph then we created it during
+      // the reduction process. If that's the case then it's a NoEscape base
+      // and we need to add it's edge at least to it's parent right now. We
+      // then push it to alloc_worklist so that the field loads from it will
+      // be processed in split_unique_types later on.
+      _nodes.at_grow(base->_idx, nullptr);
+      if (base->is_ConstraintCast() && _nodes.at(base->_idx) == nullptr) {
+        PointsToNode *jobj_ptn = unique_java_object(base->in(1));
+        if (jobj_ptn == nullptr || !jobj_ptn->scalar_replaceable()) {
+          continue;
+        }
+
+        add_local_var(base, PointsToNode::NoEscape);
+        add_edge(ptnode_adr(base->_idx), ptnode_adr(base->in(1)->_idx));
+        add_edge(ptnode_adr(base->_idx), jobj_ptn);
+
+        alloc_worklist.append_if_missing(base);
+
+        // For this case we don't push the addp/load on the worklists
+        // because they'll be pushed when the base is processed by split_unique_types.
+      } else {
+        // The base might not be something that we can create an unique
+        // type for. If that's the case we are done with that input.
+        PointsToNode *jobj_ptn = unique_java_object(base);
+        if (jobj_ptn == nullptr || !jobj_ptn->scalar_replaceable()) {
+          continue;
+        }
+      }
+
+      // Push to alloc/memnode_worklist since the base has an unique_type
+      alloc_worklist.append_if_missing(new_addp);
+      memnode_worklist.append_if_missing(new_load);
+
+      // Now let's add the node to the connection graph
+      _nodes.at_grow(new_addp->_idx, nullptr);
+      add_field(new_addp, field_node->escape_state(), field_node->offset());
+      add_base(ptnode_adr(new_addp->_idx)->as_Field(), ptnode_adr(base->_idx));
+
+      // If the load doesn't load an object then it won't be
+      // part of the connection graph
+      PointsToNode *curr_load_ptn = ptnode_adr(previous_load->_idx);
+      if (curr_load_ptn != nullptr) {
+        _nodes.at_grow(new_load->_idx, nullptr);
+        add_local_var(new_load, curr_load_ptn->escape_state());
+        add_edge(ptnode_adr(new_load->_idx), ptnode_adr(new_addp->_idx)->as_Field());
+      }
+    }
+  }
+}
+
+// This method will return a new PhiNode. The Phi inputs are clones of
+// 'nsr_load' for the SR inputs of 'ophi' and "Zero" for the NSR inputs of
+// 'ophi'.
+Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast, Node* selector, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
+  Node* address         = nsr_load->in(LoadNode::Address);
+  Node* memory          = nsr_load->in(LoadNode::Memory);
+  const Type* load_type = nsr_load->bottom_type();
+  Node* nsr_value       = _igvn->zerocon(load_type->basic_type());
+  Node* region          = ophi->in(0);
+  Node* phi             = _igvn->transform(PhiNode::make(region, nsr_value, load_type));
+
+  for (uint i = 1; i < selector->req(); i++) {
+    Node* in = region->in(i);
+    Node* sel_in = selector->in(i);
+
+    if (sel_in->as_ConI()->get_int() == -1) {
+      // Skip cloning load for this entry because it's a NSR input in the base
+      continue;
+    }
+
+    if (region->is_CountedLoop() && region->as_Loop()->is_strip_mined() && i == LoopNode::EntryControl &&
+        in != nullptr && in->is_OuterStripMinedLoop()) {
+      // No node should go in the outer strip mined loop
+      in = in->in(LoopNode::EntryControl);
+    }
+
+    Node* base_for_sr_load       = ophi->in(i);
+    JavaObjectNode* ptn          = unique_java_object(base_for_sr_load);
+    AllocateNode* alloc          = ptn->ideal_node()->as_Allocate();
+    const TypeOopPtr* cast_t     = _igvn->type(cast)->isa_oopptr();
+    const TypeOopPtr* cast_tinst = cast_t->cast_to_exactness(true)->cast_to_instance_id(alloc->_idx);
+
+    if (cast_tinst != _igvn->type(ophi->in(i))) {
+      base_for_sr_load = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), ophi->in(i)->in(0), ophi->in(i), cast_tinst, ConstraintCastNode::RegularDependency));
+    }
+
+    Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
+    const TypePtr* adr_type = sr_load_addr->bottom_type()->is_ptr();
+    Node* sr_load = LoadNode::make(*_igvn, nullptr, (memory->is_Phi() && (memory->in(0) == region)) ? memory->in(i) : memory, sr_load_addr, adr_type, load_type, load_type->basic_type(), MemNode::unordered);
+
+    // We don't need this DecodeN because the Phi that will use this Load is
+    // expecting a type equal to the Load type.
+    if (sr_load->is_DecodeN()) {
+      sr_load = sr_load->in(1);
+    } else {
+      sr_load = _igvn->transform(sr_load);
+    }
+
+    phi->set_req(i, sr_load);
+  }
+
+  // Update ConnectionGraph and split_unique_type worklists.
+  update_after_partial_load_split(phi, address, nsr_load, alloc_worklist, memnode_worklist);
+
+  return phi;
+}
+
+// This method will process field loads that are under a CastPP or CheckCastPP.
+// Each load will be transformed into a sequence Phi -> Phi.
+//
+//  - The first Phi of each pair will be placed before 'ophi' and will merge
+//  Loads from scalar replaceable locations with 'default' values for non-scalar
+//  replaceable locations.
+//
+//  - The second Phi of the pair will merge the result of the first Phi with a
+//  Load from the casted 'ophi'. This second load and its cast are inserted
+//  under an IfNode and it's only executed if a NSR input of 'ophi' was
+//  selected.
+void ConnectionGraph::reduce_phi_on_cast_field_access(PhiNode* ophi, Node* selector, Node* cast, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
+  bool ophi_has_nsr_input = false;
+
+  // If there is no NSR input much of the code later in this method is simplified.
+  for (uint i = 1; i < selector->req(); i++) {
+    Node* sel_in = selector->in(i);
+
+    if (sel_in->as_ConI()->get_int() == -1) {
+      ophi_has_nsr_input = true;
+      break;
+    }
+  }
+
+  Unique_Node_List processed_addps;
+  for (int i = cast->outcnt()-1; i >= 0;) {
+    Node* use = cast->raw_out(i);
+    if (use->is_AddP() && !processed_addps.member(use)) {
+      _igvn->hash_delete(use);
+
+      for (uint j = 0; j < use->outcnt(); j++) {
+        Node* use_use = use->raw_out(j);
+        if (use_use->is_Load()) {
+          _igvn->hash_delete(use_use);
+
+          Node* current_control = use_use->in(0) != nullptr ? use_use->in(0) :
+                                     cast->in(0) != nullptr ?    cast->in(0) :
+                                     ophi->in(0);
+
+          // 'sr_value_phi' is a Phi merging values loaded from SR inputs with *default* values for NSR inputs
+          Node* sr_value_phi = partial_load_split(use_use, ophi, cast, selector, alloc_worklist, memnode_worklist);
+
+          // This is the Phi merging the value loaded from the SR and NSR inputs
+          Node* final_phi = ophi_has_nsr_input ?
+                            specialize_cast_as_nsr(current_control, selector, use_use, cast, sr_value_phi) :
+                            sr_value_phi;
+
+          // Every node using result of current Load will now use the final phi
+          for (DUIterator_Last kmin, k = use_use->last_outs(kmin); k >= kmin; ) {
+            Node *load_use = use_use->last_out(k);
+            _igvn->hash_delete(load_use);
+            int uses = load_use->replace_edge(use_use, final_phi);
+            assert(uses > 0, "sanity");
+            k -= uses;
+            _igvn->_worklist.push(load_use);
+            _igvn->hash_insert(load_use);
+          }
+
+          if (ophi_has_nsr_input) {
+            // The final Phi needs to load value from the NSR side
+            final_phi->set_req(2, use_use);
+
+            // Push some nodes down in the control graph to make sure we don't "cross" the
+            // direction of data/control flow.
+            for (DUIterator_Fast kmax, k = current_control->fast_outs(kmax); k < kmax; k++) {
+              Node* use = current_control->fast_out(k);
+              if (!use->is_CFG() && !use->is_Phi() && use != cast && use->in(0) != nullptr) {
+                _igvn->hash_delete(use);
+                use->set_req(0, final_phi->in(0));
+                _igvn->hash_insert(use);
+                _igvn->_worklist.push(use);
+
+                --k;
+                --kmax;
+              }
+            }
+
+            _igvn->hash_insert(use_use);
+            _igvn->_worklist.push(use_use);
+          } else {
+            _igvn->remove_dead_node(use_use);
+          }
+
+          _igvn->register_new_node_with_optimizer(final_phi);
+        }
+      }
+
+      _igvn->hash_insert(use);
+      _igvn->_worklist.push(use);
+
+      processed_addps.push(use);
+    }
+
+    --i;
+    i = MIN2(i, (int)cast->outcnt()-1);
+  }
+}
+
+// This method transforms the `CmpP/N Ophi, other` into this equation: `A or (!B and C)`.
+// The A and B terms are constructed using only the inputs of Ophi that are
+// scalar replaceable.
+//    - 'A' and 'B' are logical expressions of the form `selector == a1 OR selector == a2 OR ... selector == aN`.
+//
+//    - 'A' is a expression that returns TRUE if, during the execution of the
+//      method, the activated input of 'Ophi' is one for which we were able to
+//      prove, at compile time, that it IS EQUAL to 'other'.
+//
+//    - 'B' is a expression that returns TRUE if, during the execution of the
+//      method, the activated input of 'Ophi' is one for which we were able to
+//      prove, at compile time, that it IS NOT EQUAL to 'other'.
+//
+//    - 'C' is the result of `CmpP/N Ophi, other` but note that it will use a
+//      version of 'Ophi' where the scalar replaceable inputs are nullptr.
+//
+void ConnectionGraph::reduce_phi_on_cmp(PhiNode* ophi, Node* selector, Node* cmp) {
+  assert(cmp->outcnt() == 1, "sanity");
+
+  Node* other           = (cmp->in(1) == ophi) ? cmp->in(2) : cmp->in(1);
+  Node* bool_copy       = _igvn->transform(cmp->raw_out(0)->clone());
+  BoolTest curr_bool_op = bool_copy->as_Bool()->_test;
+  Node* set_a           = _igvn->makecon(TypeInt::ZERO);
+  Node* set_b           = _igvn->makecon(TypeInt::ZERO);
+
+  // Iterate over the scalar replaceable inputs of 'ophi' and construct the
+  // logical expressions 'A' and 'B'.
+  for (uint i = 1; i < ophi->req(); i++) {
+    ConINode* selector_base_id = selector->in(i)->as_ConI();
+
+    // We only care for the SR bases. The other ones will be taken care by the
+    // existing CmpP/N.
+    if (selector_base_id->get_int() != -1) {
+      JavaObjectNode* sr_obj        = unique_java_object(ophi->in(i));
+      BoolTest::mask static_cmp_res = static_cmpp_result(sr_obj, other);
+      Node* was_this_path_taken_cmp = _igvn->transform(new CmpINode(selector, selector_base_id));
+      Node* was_this_path_taken_bol = _igvn->transform(new BoolNode(was_this_path_taken_cmp, BoolTest::eq));
+      Node* as_int                  = was_this_path_taken_bol->as_Bool()->as_int_value(_igvn);
+
+      if (static_cmp_res == curr_bool_op._test) {
+        set_a = set_a->is_Con() ? as_int : _igvn->transform(new OrINode(set_a, as_int));
+      } else {
+        set_b = set_b->is_Con() ? as_int : _igvn->transform(new OrINode(set_b, as_int));
+      }
+    }
+  }
+
+  // Construct the "right side" of the equaltion, i.e., the part  "(!B and C)".
+  Node* right_side  = nullptr;
+  if (!set_b->is_Con()) {
+    Node* not_b_cmp   = _igvn->transform(new CmpINode(set_b, _igvn->makecon(TypeInt::ZERO)));
+    Node* not_b_bool  = _igvn->transform(new BoolNode(not_b_cmp, BoolTest::eq));
+    Node* not_b_int   = not_b_bool->as_Bool()->as_int_value(_igvn);
+    right_side  = _igvn->transform(new AndINode(not_b_int, bool_copy->as_Bool()->as_int_value(_igvn)));
+  } else {
+    right_side = bool_copy->as_Bool()->as_int_value(_igvn);
+  }
+
+  // Put all parts together to form "A or (!B and C)".
+  Node* final_merge = _igvn->transform(new OrINode(set_a, right_side));
+  Node* final_final = _igvn->transform(new CmpINode(final_merge, _igvn->makecon(TypeInt::ZERO)));
+  Node* final_bool  = _igvn->transform(new BoolNode(final_final, BoolTest::ne));
+
+  _igvn->replace_node(cmp->raw_out(0), final_bool);
+}
+
+// Creates an "If-{IfTrue, IfFalse}-Region" rooted at 'current_control'.  The
+// Cmp/Bool condition used in the new IfNode is whether or not the output of the
+// 'selector' is '-1' - i.e., whether the executed input of 'Ophi' was
+// scalarized or not.
+Node* ConnectionGraph::specialize_cast_as_nsr(Node* current_control, Node* selector, Node* use_use, Node* cast, Node* sr_value_phi) {
+  Node* control_successor  = current_control->unique_ctrl_out();
+  Node* addp               = use_use->in(LoadNode::Address);
+  Node* minus_one          = _igvn->transform(ConINode::make(-1));
+  Node* cmp                = _igvn->transform(new CmpINode(selector, minus_one));
+  Node* boll               = _igvn->transform(new BoolNode(cmp, BoolTest::ne));
+  IfNode* if_is_sr         = _igvn->transform(new IfNode(current_control, boll, PROB_MIN, COUNT_UNKNOWN))->as_If();
+  Node* yes_sr_control     = _igvn->transform(new IfTrueNode(if_is_sr));
+  Node* not_sr_control     = _igvn->transform(new IfFalseNode(if_is_sr));
+  Node* selector_if_region = _igvn->transform(new RegionNode(3));
+
+  // Insert the new if-else-region block into the graph
+  selector_if_region->set_req(1, yes_sr_control);
+  selector_if_region->set_req(2, not_sr_control);
+  control_successor->replace_edge(current_control, selector_if_region, _igvn);
+
+  _igvn->_worklist.push(current_control);
+  _igvn->_worklist.push(control_successor);
+
+  Node* new_cast = _igvn->transform(ConstraintCastNode::make_cast(cast->Opcode(), not_sr_control, cast->in(1), _igvn->type(cast), ConstraintCastNode::UnconditionalDependency));
+  addp->set_req(AddPNode::Base, new_cast);
+  addp->set_req(AddPNode::Address, new_cast);
+
+  return PhiNode::make(selector_if_region, sr_value_phi, use_use->bottom_type());
+}
+
+// Create a 'selector' Phi based on the inputs of 'ophi'. If index 'i' of the
+// selector is:
+//    -> a '-1' constant, the i'th input of the original Phi is NSR.
+//    -> a 'x' constant >=0, the i'th input of of original Phi will be SR and
+//       the info about the scalarized object will be at index x of ObjectMergeValue::possible_objects
+PhiNode* ConnectionGraph::create_selector(PhiNode* ophi) const {
+  Node* minus_one = _igvn->register_new_node_with_optimizer(ConINode::make(-1));
+  Node* selector  = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), minus_one, TypeInt::INT));
+  uint number_of_sr_objects = 0;
+  for (uint i = 1; i < ophi->req(); i++) {
+    Node* base = ophi->in(i);
+    JavaObjectNode* ptn = unique_java_object(base);
+
+    if (ptn != nullptr && ptn->scalar_replaceable()) {
+      Node* sr_obj_idx = _igvn->register_new_node_with_optimizer(ConINode::make(number_of_sr_objects));
+      selector->set_req(i, sr_obj_idx);
+      number_of_sr_objects++;
+    }
+  }
+
+  return selector->as_Phi();
+}
+
+void ConnectionGraph::reset_scalar_replaceable_entries(PhiNode* ophi) {
+  Node* null_ptr            = _igvn->makecon(TypePtr::NULL_PTR);
+  const TypeOopPtr* merge_t = _igvn->type(ophi)->make_oopptr();
+  const Type* new_t         = merge_t->meet(TypePtr::NULL_PTR);
+  Node* new_phi             = _igvn->register_new_node_with_optimizer(PhiNode::make(ophi->region(), null_ptr, new_t));
+
   for (uint i = 1; i < ophi->req(); i++) {
     Node* base          = ophi->in(i);
     JavaObjectNode* ptn = unique_java_object(base);
@@ -703,26 +1167,72 @@ void ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi, Unique_Node_List* 
     }
   }
 
+  for (int i = ophi->outcnt()-1; i >= 0;) {
+    Node* out = ophi->raw_out(i);
+
+    if (out->is_ConstraintCast()) {
+      const Type* out_t = _igvn->type(out)->make_ptr();
+      const Type* out_new_t = out_t->meet(TypePtr::NULL_PTR);
+      bool change = out_new_t != out_t;
+
+      for (int j = out->outcnt()-1; change && j >= 0; --j) {
+        Node* out2 = out->raw_out(j);
+        if (!out2->is_SafePoint()) {
+          change = false;
+          break;
+        }
+      }
+
+      if (change) {
+        Node* new_cast = ConstraintCastNode::make_cast(out->Opcode(), out->in(0), out->in(1), out_new_t, ConstraintCastNode::StrongDependency);
+        _igvn->replace_node(out, new_cast);
+        _igvn->register_new_node_with_optimizer(new_cast);
+      }
+    }
+
+    --i;
+    i = MIN2(i, (int)ophi->outcnt()-1);
+  }
+
   _igvn->replace_node(ophi, new_phi);
-  _igvn->hash_insert(ophi);
-  _igvn->_worklist.push(ophi);
 }
 
-void ConnectionGraph::reduce_phi(PhiNode* ophi) {
-  Unique_Node_List safepoints;
+// Reduce phi users that aren't related to debugging information:
+//   Field loads: will be reduced by calling 'split_through_phi'.
+//   CmpP/N: we'll resolve the comparison with scalar replaceable inputs
+//           statically so we can later remove them from the Phi.
+//   CastPP/CheckCastPP: only field loads are reduced here.
+void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
+  Unique_Node_List phi_users;
+  PhiNode* selector = nullptr;
 
-  for (uint i = 0; i < ophi->outcnt(); i++) {
-    Node* use = ophi->raw_out(i);
+  bool delay = _igvn->delay_transform();
+  _igvn->set_delay_transform(true);
+  _igvn->hash_delete(ophi);
 
-    // All SafePoint nodes using the same Phi node use the same debug
-    // information (regarding the Phi). Furthermore, reducing the Phi used by a
-    // SafePoint requires changing the Phi. Therefore, I collect all safepoints
-    // and patch them all at once later.
+  // Copying all users first because some will be removed and others won't.
+  // Ophi also may acquire some new users as part of Cast reduction.
+  for (DUIterator_Fast imax, i = ophi->fast_outs(imax); i < imax; i++) {
+    Node* use = ophi->fast_out(i);
+    phi_users.push(use);
+  }
+
+  for (uint i=0; i<phi_users.size(); i++) {
+    Node* use = phi_users.at(i);
+
     if (use->is_SafePoint()) {
-      safepoints.push(use->as_SafePoint());
+      // will be done later
+    } else if (use->is_AddP()) {
+      reduce_phi_on_field_access(use, alloc_worklist);
+    } else if (use->is_Cmp()) {
+      selector = (selector == nullptr) ? create_selector(ophi) : selector;
+      reduce_phi_on_cmp(ophi, selector, use);
+    } else if (use->is_CastPP() || use->is_CheckCastPP()) {
+      selector = (selector == nullptr) ? create_selector(ophi) : selector;
+      reduce_phi_on_cast_field_access(ophi, selector, use, alloc_worklist, memnode_worklist);
     } else {
 #ifdef ASSERT
-      ophi->dump(-3);
+      ophi->dump(-2);
       assert(false, "Unexpected user of reducible Phi %d -> %d:%s", ophi->_idx, use->_idx, use->Name());
 #endif
       _compile->record_failure(C2Compiler::retry_no_reduce_allocation_merges());
@@ -730,9 +1240,7 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi) {
     }
   }
 
-  if (safepoints.size() > 0) {
-    reduce_phi_on_safepoints(ophi, &safepoints);
-  }
+  _igvn->set_delay_transform(delay);
 }
 
 void ConnectionGraph::verify_ram_nodes(Compile* C, Node* root) {
@@ -2295,11 +2803,14 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
       if (ptn->is_JavaObject() && ptn != jobj) {
         Node* use_n = use->ideal_node();
 
+        // These other local vars may point to multiple objects through a Phi
+        // In this case we skip them and see if we can reduce the Phi.
+        if (use_n->is_CastPP() || use_n->is_CheckCastPP()) {
+          use_n = use_n->in(1);
+        }
+
         // If it's already a candidate or confirmed reducible merge we can skip verification
-        if (candidates.member(use_n)) {
-          continue;
-        } else if (reducible_merges.member(use_n)) {
-          candidates.push(use_n);
+        if (candidates.member(use_n) || reducible_merges.member(use_n)) {
           continue;
         }
 
@@ -2373,20 +2884,32 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
     //    if ( x ) p[0] = new Point(); // Will be not scalar replaced
     //
     if (field->base_count() > 1 && candidates.size() == 0) {
+      bool further_validate = false;
+
       for (BaseIterator i(field); i.has_next(); i.next()) {
-        PointsToNode* base = i.get();
-        // Don't take into account LocalVar nodes which
-        // may point to only one object which should be also
-        // this field's base by now.
-        if (base->is_JavaObject() && base != jobj) {
-          // Mark all bases.
-          set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "may point to more than one object"));
-          set_not_scalar_replaceable(base NOT_PRODUCT(COMMA "may point to more than one object"));
+        Node* base = i.get()->ideal_node();
+        if (base->is_Phi() && !reducible_merges.member(base)) {
+          further_validate = true;
+          break;
         }
       }
 
-      if (!jobj->scalar_replaceable()) {
-        return;
+      if (further_validate) {
+        for (BaseIterator i(field); i.has_next(); i.next()) {
+          PointsToNode* base = i.get();
+          // Don't take into account LocalVar nodes which
+          // may point to only one object which should be also
+          // this field's base by now.
+          if (base->is_JavaObject() && base != jobj) {
+            // Mark all bases.
+            set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "may point to more than one object"));
+            set_not_scalar_replaceable(base NOT_PRODUCT(COMMA "may point to more than one object"));
+          }
+        }
+
+        if (!jobj->scalar_replaceable()) {
+          return;
+        }
       }
     }
   }
@@ -3751,11 +4274,11 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
         }
       }
     } else if (n->is_AddP()) {
-      Node* addp_base = get_addp_base(n);
-      if (addp_base != nullptr && reducible_merges.member(addp_base)) {
+      if (has_reducible_merge_base(n->as_AddP(), reducible_merges)) {
         // This AddP will go away when we reduce the the Phi
         continue;
       }
+      Node* addp_base = get_addp_base(n);
       JavaObjectNode* jobj = unique_java_object(addp_base);
       if (jobj == nullptr || jobj == phantom_obj) {
 #ifdef ASSERT
@@ -3777,10 +4300,15 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
         assert(n->is_Phi(), "loops only through Phi's");
         continue;  // already processed
       }
-      // Reducible Phi's will be removed from the graph after split_unique_types finishes
+      // Reducible Phi's will be removed from the graph after split_unique_types
+      // finishes. For now we just try to split out the SR inputs of the merge.
+      Node* parent = n->in(1);
       if (reducible_merges.member(n)) {
-        // Split loads through phi
-        reduce_phi_on_field_access(n->as_Phi(), alloc_worklist);
+        reduce_phi(n->as_Phi(), alloc_worklist, memnode_worklist);
+        continue;
+      } else if (reducible_merges.member(parent)) {
+        // 'n' is an user of a reducible merge (a Phi). It will be simplified as
+        // part of reduce_merge.
         continue;
       }
       JavaObjectNode* jobj = unique_java_object(n);
@@ -3898,9 +4426,9 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
     Node* phi = reducible_merges.at(i);
     for (DUIterator_Fast jmax, j = phi->fast_outs(jmax); j < jmax; j++) {
       Node* use = phi->fast_out(j);
-      if (!use->is_SafePoint()) {
-        phi->dump(-3);
-        assert(false, "Unexpected user of reducible Phi -> %s", use->Name());
+      if (!use->is_SafePoint() && !use->is_ConstraintCast() && !use->is_Cmp() && use->outcnt() > 0) {
+        phi->dump(-2);
+        assert(false, "Unexpected user of reducible Phi -> %d:%s", use->_idx, use->Name());
       }
     }
   }
