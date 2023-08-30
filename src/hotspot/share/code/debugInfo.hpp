@@ -140,7 +140,7 @@ class ObjectValue: public ScopeValue {
                                          // Otherwise false, meaning it's just a candidate
                                          // in an object allocation merge.
  public:
-  ObjectValue(int id, ScopeValue* klass)
+  ObjectValue(int id, ScopeValue* klass = nullptr, bool was_scalar_replaced = true)
      : _id(id)
      , _klass(klass)
      , _field_values()
