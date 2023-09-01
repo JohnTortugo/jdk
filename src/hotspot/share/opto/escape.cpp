@@ -619,7 +619,7 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
   // method we might have disabled the compilation and be retrying with RAM
   // disabled.
   // If EliminateAllocations is False, there is no point in reducing merges.
-  // For now we only do RAM in the first invocation so that we don't create 
+  // For now we only do RAM in the first invocation so that we don't create
   // nested SafePointScalarMergedObjects.
   if (!_compile->do_reduce_allocation_merges() || _invocation > 0) {
     return false;
@@ -883,7 +883,7 @@ void ConnectionGraph::update_after_partial_load_split(Node* data_phi, Node* prev
 Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast, Node* selector, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
   Node* address         = nsr_load->in(LoadNode::Address);
   Node* memory          = nsr_load->in(LoadNode::Memory);
-  const Type* load_type = nsr_load->bottom_type();
+  const Type* load_type = _igvn->type(nsr_load);
   Node* nsr_value       = _igvn->zerocon(load_type->basic_type());
   Node* region          = ophi->in(0);
   Node* phi             = _igvn->transform(PhiNode::make(region, nsr_value, load_type));
@@ -914,16 +914,12 @@ Node* ConnectionGraph::partial_load_split(Node* nsr_load, Node* ophi, Node* cast
     }
 
     Node* sr_load_addr = _igvn->transform(new AddPNode(base_for_sr_load, base_for_sr_load, address->in(AddPNode::Offset)));
-    const TypePtr* adr_type = sr_load_addr->bottom_type()->is_ptr();
-    Node* sr_load = LoadNode::make(*_igvn, nullptr, (memory->is_Phi() && (memory->in(0) == region)) ? memory->in(i) : memory, sr_load_addr, adr_type, load_type, load_type->basic_type(), MemNode::unordered);
 
-    // We don't need this DecodeN because the Phi that will use this Load is
-    // expecting a type equal to the Load type.
-    if (sr_load->is_DecodeN()) {
-      sr_load = sr_load->in(1);
-    } else {
-      sr_load = _igvn->transform(sr_load);
-    }
+    Node* sr_load = nsr_load->clone();
+    sr_load->set_req(0, nullptr);
+    sr_load->set_req(1, (memory->is_Phi() && (memory->in(0) == region)) ? memory->in(i) : memory);
+    sr_load->set_req(2, sr_load_addr);
+    sr_load = _igvn->transform(sr_load);
 
     phi->set_req(i, sr_load);
   }

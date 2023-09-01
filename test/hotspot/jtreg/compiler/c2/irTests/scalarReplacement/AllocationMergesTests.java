@@ -560,9 +560,7 @@ public class AllocationMergesTests {
     }
 
     @Test
-    @IR(counts = { IRNode.ALLOC, "2" })
-    // The initial allocation assigned to 's' will always be dead.
-    // The other two allocations assigned to 's' won't be removed because they have different type.
+    @IR(failOn = { IRNode.ALLOC })
     int testSubclassesTrapping_C2(boolean c1, boolean c2, int x, int y, int w, int z) { return testSubclassesTrapping(c1, c2, x, y, w, z); }
 
     @DontCompile
