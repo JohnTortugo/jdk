@@ -3081,6 +3081,15 @@ const TypeInt* ConnectionGraph::optimize_ptr_compare(Node* left, Node* right) {
   PointsToNode* ptn2 = ptnode_adr(right->_idx);
   JavaObjectNode* jobj1 = unique_java_object(left);
   JavaObjectNode* jobj2 = unique_java_object(right);
+
+  // The use of this method during allocation merge reduction may cause 'left'
+  // or 'right' be something (e.g., a Phi) that isn't in the connection graph or
+  // that doesn't reference an unique java object.
+  if (ptn1 == nullptr || ptn2 == nullptr ||
+      jobj1 == nullptr || jobj2 == nullptr) {
+    return UNKNOWN;
+  }
+
   assert(ptn1->is_JavaObject() || ptn1->is_LocalVar(), "sanity");
   assert(ptn2->is_JavaObject() || ptn2->is_LocalVar(), "sanity");
 

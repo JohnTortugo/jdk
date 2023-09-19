@@ -2311,7 +2311,6 @@ void Compile::Optimize() {
     print_method(PHASE_PHASEIDEAL_BEFORE_EA, 2);
     do {
       ConnectionGraph::do_analysis(this, &igvn);
-      print_method(PHASE_ITER_GVN_AFTER_EA, 2);
 
       if (failing())  return;
 
@@ -2319,6 +2318,7 @@ void Compile::Optimize() {
 
       // Optimize out fields loads from scalar replaceable allocations.
       igvn.optimize();
+      print_method(PHASE_ITER_GVN_AFTER_EA, 2);
 
       if (failing())  return;
 
