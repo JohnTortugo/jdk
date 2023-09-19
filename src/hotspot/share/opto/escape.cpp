@@ -596,7 +596,7 @@ Node* ConnectionGraph::specialize_cmp(Node* base, Node* curr_ctrl) {
   Node* con = nullptr;
 
   if (curr_ctrl == nullptr || curr_ctrl->is_Region()) {
-    con = _igvn->transform(ConNode::make(t));
+    con = _igvn->zerocon(t->basic_type());
   } else {
     Node* curr_cmp = curr_ctrl->in(0)->in(1)->in(1); // true/false -> if -> bool -> cmp
     con = curr_cmp->in(1)->is_Con() ? curr_cmp->in(1) : curr_cmp->in(2);

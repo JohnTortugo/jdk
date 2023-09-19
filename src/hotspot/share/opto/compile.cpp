@@ -2344,10 +2344,6 @@ void Compile::Optimize() {
     } while (progress);
   }
 
-  // if (strcmp(method()->name()->as_utf8(), "test") == 0) {
-  //   print_ideal_ir("After_EA");
-  // }
-
   // Loop transforms on the ideal graph.  Range Check Elimination,
   // peeling, unrolling, etc.
 
