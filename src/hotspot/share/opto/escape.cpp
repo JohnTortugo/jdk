@@ -479,8 +479,8 @@ bool ConnectionGraph::can_reduce_cmp(Node* n, Node* cmp) const {
 
   return (cmp->Opcode() == Op_CmpP || cmp->Opcode() == Op_CmpN) &&
          (left == n || right == n) &&
-         (left->is_Con() || right->is_Con() &&
-         cmp->outcnt() == 1);
+         (left->is_Con() || right->is_Con()) &&
+         cmp->outcnt() == 1;
 }
 
 // Check if we are able to untangle the merge. The following patterns are
