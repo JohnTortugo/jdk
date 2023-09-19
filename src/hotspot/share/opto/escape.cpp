@@ -514,7 +514,7 @@ bool ConnectionGraph::can_reduce_phi_check_users(Node* n, uint nesting) const {
     } else if (use->is_CastPP()) {
       const Type* cast_t = _igvn->type(use);
       if (cast_t == nullptr || cast_t->make_ptr()->isa_instptr() == nullptr) {
-        use->dump();
+        NOT_PRODUCT(use->dump();)
         NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. CastPP is not to an instance.", n->_idx, _invocation);)
         return false;
       }
@@ -528,7 +528,7 @@ bool ConnectionGraph::can_reduce_phi_check_users(Node* n, uint nesting) const {
           Node* iff_cmp = iff->in(1)->in(1); // if->bool->cmp
           if (!can_reduce_cmp(n, iff_cmp)) {
             NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. CastPP %d doesn't have simple control.", n->_idx, _invocation, use->_idx);)
-            n->dump(5);
+            NOT_PRODUCT(n->dump(5);)
             return false;
           }
         }
