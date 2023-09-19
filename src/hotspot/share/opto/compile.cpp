@@ -2311,6 +2311,7 @@ void Compile::Optimize() {
     print_method(PHASE_PHASEIDEAL_BEFORE_EA, 2);
     do {
       ConnectionGraph::do_analysis(this, &igvn);
+      print_method(PHASE_ITER_GVN_AFTER_EA, 2);
 
       if (failing())  return;
 
@@ -2318,7 +2319,6 @@ void Compile::Optimize() {
 
       // Optimize out fields loads from scalar replaceable allocations.
       igvn.optimize();
-      print_method(PHASE_ITER_GVN_AFTER_EA, 2);
 
       if (failing())  return;
 
@@ -2343,6 +2343,10 @@ void Compile::Optimize() {
       // by removing some allocations and/or locks.
     } while (progress);
   }
+
+  // if (strcmp(method()->name()->as_utf8(), "test") == 0) {
+  //   print_ideal_ir("After_EA");
+  // }
 
   // Loop transforms on the ideal graph.  Range Check Elimination,
   // peeling, unrolling, etc.
