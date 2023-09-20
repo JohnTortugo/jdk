@@ -404,25 +404,23 @@ bool ConnectionGraph::compute_escape() {
   // need to traverse the memory graph to find values for object fields. We also
   // set to null the scalarized inputs of reducible Phis so that the Allocate
   // that they point can be later scalar replaced.
-  if (reducible_merges.size() > 0) {
-    bool delay = _igvn->delay_transform();
-    _igvn->set_delay_transform(true);
-    for (uint i = 0; i < reducible_merges.size(); i++) {
-      Node* n = reducible_merges.at(i);
-      if (n->outcnt() > 0) {
-        if (!reduce_phi_on_safepoints(n->as_Phi())) {
-          NOT_PRODUCT(escape_state_statistics(java_objects_worklist);)
-          C->record_failure(C2Compiler::retry_no_reduce_allocation_merges());
-          return false;
-        }
-
-        // Now we set the scalar replaceable inputs of ophi to null, which is
-        // the last piece that would prevent it from being scalar replaceable.
-        reset_scalar_replaceable_entries(n->as_Phi());
+  bool delay = _igvn->delay_transform();
+  _igvn->set_delay_transform(true);
+  for (uint i = 0; i < reducible_merges.size(); i++) {
+    Node* n = reducible_merges.at(i);
+    if (n->outcnt() > 0) {
+      if (!reduce_phi_on_safepoints(n->as_Phi())) {
+        NOT_PRODUCT(escape_state_statistics(java_objects_worklist);)
+        C->record_failure(C2Compiler::retry_no_reduce_allocation_merges());
+        return false;
       }
+
+      // Now we set the scalar replaceable inputs of ophi to null, which is
+      // the last piece that would prevent it from being scalar replaceable.
+      reset_scalar_replaceable_entries(n->as_Phi());
     }
-    _igvn->set_delay_transform(delay);
   }
+  _igvn->set_delay_transform(delay);
 
   // Annotate at safepoints if they have <= ArgEscape objects in their scope and at
   // java calls if they pass ArgEscape objects as parameters.
@@ -490,7 +488,7 @@ bool ConnectionGraph::can_reduce_cmp(Node* n, Node* cmp) const {
 //  - Phi -> AddP -> Load
 //  - Phi -> CastPP -> SafePoints
 //  - Phi -> CastPP -> AddP -> Load
-bool ConnectionGraph::can_reduce_phi_check_users(Node* n, uint nesting) const {
+bool ConnectionGraph::can_reduce_check_users(Node* n, uint nesting) const {
   for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
     Node* use = n->fast_out(i);
 
@@ -534,11 +532,9 @@ bool ConnectionGraph::can_reduce_phi_check_users(Node* n, uint nesting) const {
         }
       }
 
-      if (!can_reduce_phi_check_users(use, nesting+1)) {
+      if (!can_reduce_check_users(use, nesting+1)) {
         return false;
       }
-
-      tty->print_cr("will reduce and thre is a castpp!");
     } else if (use->Opcode() == Op_CmpP || use->Opcode() == Op_CmpN) {
       if (!can_reduce_cmp(n, use)) {
         NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. CmpP/N %d isn't reducible.", n->_idx, _invocation, use->_idx);)
@@ -573,7 +569,7 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
     return false;
   }
 
-  if (!can_reduce_phi_check_inputs(ophi) || !can_reduce_phi_check_users(ophi, /* nesting: */ 0)) {
+  if (!can_reduce_phi_check_inputs(ophi) || !can_reduce_check_users(ophi, /* nesting: */ 0)) {
     return false;
   }
 
@@ -654,6 +650,7 @@ Node* ConnectionGraph::specialize_cmp(Node* base, Node* curr_ctrl) {
 //       -------------- | ----------
 //                    | | |
 //                    Region
+//
 Node* ConnectionGraph::specialize_castpp(Node* castpp, Node* base, Node* current_control) {
   Node* control_successor  = current_control->unique_ctrl_out();
   Node* minus_one          = _igvn->transform(ConINode::make(-1));
@@ -669,21 +666,6 @@ Node* ConnectionGraph::specialize_castpp(Node* castpp, Node* base, Node* current
   end_region->set_req(2, yes_eq_control);
   control_successor->replace_edge(current_control, end_region, _igvn);
 
-  // This is necessary because otherwise we may mess the dominance relation
-  // between inputs to Phis and corresponding control inputs in regions.
-  //for (DUIterator_Fast kmax, k = current_control->fast_outs(kmax); k < kmax; k++) {
-  //  Node* use = current_control->fast_out(k);
-  //  if (!use->is_CFG() && !use->is_Phi() && use->in(0) != nullptr) {
-  //    _igvn->hash_delete(use);
-  //    use->set_req(0, end_region);
-  //    _igvn->hash_insert(use);
-  //    _igvn->_worklist.push(use);
-
-  //    --k;
-  //    --kmax;
-  //  }
-  //}
-
   _igvn->_worklist.push(current_control);
   _igvn->_worklist.push(control_successor);
 
@@ -696,7 +678,7 @@ Node* ConnectionGraph::split_castpp_load_through_phi(Node* curr_addp, Node* curr
   Node* data_phi        = _igvn->transform(PhiNode::make(region, nsr_value, load_type));
   Node* memory          = curr_load->in(MemNode::Memory);
 
-  for (int i=1; i<bases_for_loads->length(); i++) {
+  for (int i = 1; i < bases_for_loads->length(); i++) {
     Node* base = bases_for_loads->at(i);
     Node* cmp_region = nullptr;
     if (base != nullptr) {
@@ -732,7 +714,79 @@ Node* ConnectionGraph::split_castpp_load_through_phi(Node* curr_addp, Node* curr
   return data_phi;
 }
 
-void ConnectionGraph::reduce_phi_on_castpp(Node* curr_castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
+// This method only reduces CastPP fields loads; SafePoints are handled
+// separately. The idea here is basically to clone the CastPP and place copies
+// on each input of the Phi, including non-scalar replaceable inputs.
+// Experimentation shows that the resulting IR graph is simpler that way than if
+// we just split the cast through scalar-replaceable inputs.
+//
+// The reduction process requires that CastPP's control be one of:
+//  1) no control,
+//  2) the same region as Ophi, or
+//  3) an IfTrue/IfFalse coming from an CmpP/N between Ophi and a constant.
+//
+// After splitting the CastPP we'll put it under an If-Then-Else-Region control
+// flow. If the CastPP originally had an IfTrue/False control input then we'll
+// use a similar CmpP/N to control the new If-Then-Else-Region. Otherwise, we'll
+// juse use a CmpP/N against the NULL constant.
+//
+// The If-Then-Else-Region isn't always needed. For instance, if input to
+// splitted cast was not nullable (or if it was the NULL constant) then we don't
+// need (shouldn't) use a CastPP at all.
+//
+// After the casts are splitted we'll split the AddP->Loads through the Phi and
+// connect them to the just split CastPPs.
+//
+// Before (CastPP control is same as Phi):
+//
+//          Region     Allocate   Null    Call
+//            |             \      |      /
+//            |              \     |     /
+//            |               \    |    /
+//            |                \   |   /
+//            |                 \  |  /
+//            |                  \ | /
+//            ------------------> Phi            # Oop Phi
+//            |                    |
+//            |                    |
+//            |                    |
+//            |                    |
+//            ----------------> CastPP
+//                                 |
+//                               AddP
+//                                 |
+//                               Load
+//
+// After (Very much simplified):
+//
+//                         Call  NULL
+//                            \  /
+//                            CmpP
+//                             |
+//                           Bool#NE
+//                             |
+//                             If
+//                            / \
+//                           T   F
+//                          / \ /
+//                         /   R
+//                     CastPP  |
+//                       |     |
+//                     AddP    |
+//                       |     |
+//                     Load    |
+//                         \   |   0
+//            Allocate      \  |  /
+//                \          \ | /
+//               AddP         Phi
+//                  \         /
+//                 Load      /
+//                    \  0  /
+//                     \ | /
+//                      \|/
+//                      Phi        # "Field" Phi
+//
+void ConnectionGraph::reduce_phi_on_castpp_field_load(Node* curr_castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist) {
   Node* ophi = curr_castpp->in(1);
   assert(ophi->is_Phi(), "Expected this to be a Phi node.");
 
@@ -752,7 +806,7 @@ void ConnectionGraph::reduce_phi_on_castpp(Node* curr_castpp, GrowableArray<Node
   //                to load directly from it.
   GrowableArray<Node*> bases_for_loads(ophi->req(), ophi->req(), nullptr);
 
-  for (uint i=1; i<ophi->req(); i++) {
+  for (uint i = 1; i < ophi->req(); i++) {
     Node* base = ophi->in(i);
     const Type* base_t = _igvn->type(base);
 
@@ -764,31 +818,15 @@ void ConnectionGraph::reduce_phi_on_castpp(Node* curr_castpp, GrowableArray<Node
         bases_for_loads.at_put(i, new_castpp->in(0)); // Use the ctrl of the new node just as a flag
       }
     } else {
-#ifdef ASSERT
-      if (base_t->is_known_instance()) {
-        assert(_igvn->type(curr_castpp)->isa_oopptr() != nullptr, "sanity");
-        const Type* t = _igvn->type(curr_castpp)->isa_oopptr()->cast_to_exactness(true)->cast_to_instance_id(base_t->isa_instptr()->instance_id());
-        if(base_t != t) {
-          tty->print_cr("Base: "); base_t->dump(); tty->cr();
-          tty->print_cr("Cast: "); t->dump(); tty->cr();
-        }
-        //assert(base_t == t, "Expected this to be of same type.");
-      } else {
-        const Type* t = _igvn->type(curr_castpp);
-        tty->print_cr("Base: "); base_t->dump(); tty->cr();
-        tty->print_cr("Cast: "); t->dump(); tty->cr();
-        //assert(base_t == _igvn->type(curr_castpp), "Should be of same type.");
-      }
-#endif
       bases_for_loads.at_put(i, base);
     }
   }
 
   // Now let's split the CastPP->Loads through the Phi
-  for (int i=curr_castpp->outcnt()-1; i>=0;) {
+  for (int i = curr_castpp->outcnt()-1; i >= 0;) {
     Node* use = curr_castpp->raw_out(i);
     if (use->is_AddP()) {
-      for (int j=use->outcnt()-1; j>=0;) {
+      for (int j = use->outcnt()-1; j >= 0;) {
         Node* use_use = use->raw_out(j);
         assert(use_use->is_Load(), "Expected this to be a Load node.");
 
@@ -821,43 +859,43 @@ void ConnectionGraph::reduce_phi_on_castpp(Node* curr_castpp, GrowableArray<Node
 //
 // Before:
 //
-//  in1    in2 ... inN
-//   \      |      /
-//    \     |     /
-//     \    |    /
-//      \   |   /
-//       \  |  /
-//        \ | /
-//         Phi
-//          |   Other
-//          |    /
-//          |   /
-//          |  /
-//         CmpP/N
+//             in1    in2 ... inN
+//              \      |      /
+//               \     |     /
+//                \    |    /
+//                 \   |   /
+//                  \  |  /
+//                   \ | /
+//                    Phi
+//                     |   Other
+//                     |    /
+//                     |   /
+//                     |  /
+//                    CmpP/N
 //
 // After:
 //
-//  in1  Other   in2 Other  inN  Other
-//   |    |      |   |      |    |
-//   \    |      |   |      |    |
-//    \  /       |   /      |    /
-//    CmpP/N    CmpP/N     CmpP/N
-//    Bool      Bool       Bool
-//      \        |        /
-//       \       |       /
-//        \      |      /
-//         \     |     /
-//          \    |    /
-//           \   |   /
-//            \  |  /
-//             \ | /
-//              Phi
-//               |
-//               |   Zero
-//               |    /
-//               |   /
-//               |  /
-//               CmpI
+//        in1  Other   in2 Other  inN  Other
+//         |    |      |   |      |    |
+//         \    |      |   |      |    |
+//          \  /       |   /      |    /
+//          CmpP/N    CmpP/N     CmpP/N
+//          Bool      Bool       Bool
+//            \        |        /
+//             \       |       /
+//              \      |      /
+//               \     |     /
+//                \    |    /
+//                 \   |   /
+//                  \  |  /
+//                   \ | /
+//                    Phi
+//                     |
+//                     |   Zero
+//                     |    /
+//                     |   /
+//                     |  /
+//                     CmpI
 //
 //
 void ConnectionGraph::reduce_phi_on_cmp(Node* cmp) {
@@ -1030,7 +1068,7 @@ bool ConnectionGraph::has_reducible_merge_base(AddPNode* n, Unique_Node_List &re
 }
 
 // This method will call its helper method to reduce SafePoint nodes that use
-// 'ophi' or a casted version of 'ophi'.  All SafePoint nodes using the same
+// 'ophi' or a casted version of 'ophi'. All SafePoint nodes using the same
 // "version" of Phi use the same debug information (regarding the Phi).
 // Therefore, I collect all safepoints and patch them all at once.
 bool ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi) {
@@ -1049,6 +1087,8 @@ bool ConnectionGraph::reduce_phi_on_safepoints(PhiNode* ophi) {
         Node* use_use = use->fast_out(j);
         if (use_use->is_SafePoint()) {
           child_sfpts.push(use_use);
+        } else {
+          assert(use_use->outcnt() == 0, "Only SafePoint users should be left.");
         }
       }
 
@@ -1096,7 +1136,7 @@ bool ConnectionGraph::reduce_phi_on_safepoints_helper(Node* ophi, Node* cast, No
     sfpt->add_req(selector);
 
     for (uint i = 1; i < ophi->req(); i++) {
-      Node* base          = ophi->in(i);
+      Node* base = ophi->in(i);
       JavaObjectNode* ptn = unique_java_object(base);
 
       // If the base is not scalar replaceable we don't need to register information about
@@ -1160,11 +1200,11 @@ void ConnectionGraph::reduce_phi(PhiNode* ophi, GrowableArray<Node *>  &alloc_wo
   // CastPPs need to be processed before Cmps because during the process of
   // splitting CastPPs we make reference to the inputs of the Cmp that is used
   // by the If controlling the CastPP.
-  for (uint i=0; i<castpps.size(); i++) {
-    reduce_phi_on_castpp(castpps.at(i), alloc_worklist, memnode_worklist);
+  for (uint i = 0; i < castpps.size(); i++) {
+    reduce_phi_on_castpp_field_load(castpps.at(i), alloc_worklist, memnode_worklist);
   }
 
-  for (uint i=0; i<others.size(); i++) {
+  for (uint i = 0; i < others.size(); i++) {
     Node* use = others.at(i);
 
     if (use->is_AddP()) {

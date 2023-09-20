@@ -599,11 +599,11 @@ private:
 
   bool can_reduce_cmp(Node* n, Node* cmp) const;
   bool can_reduce_phi(PhiNode* ophi) const;
-  bool can_reduce_phi_check_users(Node* ophi, uint nesting) const;
+  bool can_reduce_check_users(Node* n, uint nesting) const;
   bool can_reduce_phi_check_inputs(PhiNode* ophi) const;
 
   void reduce_phi_on_field_access(Node* previous_addp, GrowableArray<Node *>  &alloc_worklist);
-  void reduce_phi_on_castpp(Node* castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
+  void reduce_phi_on_castpp_field_load(Node* castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);
   void reduce_phi_on_cmp(Node* cmp);
   bool reduce_phi_on_safepoints(PhiNode* ophi);
   bool reduce_phi_on_safepoints_helper(Node* ophi, Node* cast, Node* selector, Unique_Node_List& safepoints);
