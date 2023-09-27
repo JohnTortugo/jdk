@@ -382,8 +382,11 @@ public:
   void set_removed() { add_flag(Flag_is_removed_by_peephole); }
   bool get_removed() { return (flags() & Flag_is_removed_by_peephole) != 0; }
 
+  virtual const char* Name() const {
+    return "MachNode";
+  }
+
 #ifndef PRODUCT
-  virtual const char *Name() const = 0; // Machine-specific name
   virtual void dump_spec(outputStream *st) const; // Print per-node info
   void         dump_format(PhaseRegAlloc *ra, outputStream *st) const; // access to virtual
 #endif

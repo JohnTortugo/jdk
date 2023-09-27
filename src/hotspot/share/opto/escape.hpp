@@ -585,6 +585,20 @@ private:
   void record_for_optimizer(Node *n);
 
   // Compute the escape information
+  void phi_users_info(PhaseIterGVN* igvn, Node* phi, uint& castpp, uint& checkcastpp, uint& cmp, uint& sfpt, uint& other) const;
+  void phi_inputs_info(PhaseIterGVN* igvn, Node* phi, bool& sr_input, bool& nullable, bool& null_input, uint& how_many_nullable) const;
+
+  void print_if(Node* n, int indentation) const;
+  void print_bool(Node* n, int indentation) const;
+  void print_call(Node* n, int indentation) const;
+  void print_load(Node* n, int indentation) const;
+  void print_store(Node* n, int indentation) const;
+  void print_node(Node* n, int indentation) const;
+  void print_phi(Node* phi, int indentation) const;
+  void print_addp(Node* n, int indentation) const;
+  void print_cmp(Node* n, int indentation) const;
+  void print_decoden(Node* n, int indentation) const;
+  void print_cast(Node* n, int indentation) const;
   bool compute_escape();
 
   // -------------------------------------------
@@ -599,8 +613,8 @@ private:
 
   bool can_reduce_cmp(Node* n, Node* cmp) const;
   bool can_reduce_phi(PhiNode* ophi) const;
-  bool can_reduce_check_users(Node* n, uint nesting) const;
-  bool can_reduce_phi_check_inputs(PhiNode* ophi) const;
+  bool can_reduce_check_users(Node* n, uint nesting, int& can_reduce_status) const;
+  bool can_reduce_phi_check_inputs(PhiNode* ophi, int& can_reduce_status) const;
 
   void reduce_phi_on_field_access(Node* previous_addp, GrowableArray<Node *>  &alloc_worklist);
   void reduce_phi_on_castpp_field_load(Node* castpp, GrowableArray<Node *>  &alloc_worklist, GrowableArray<Node *>  &memnode_worklist);

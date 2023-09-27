@@ -44,6 +44,362 @@
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
+static void indent(fileStream* log, int indent) {
+  for (int i=0; i<indent; i++) {
+    log->print("    ");
+  }
+}
+
+static bool is_read_only(Node* merge_phi_region, Node* base, PhaseIterGVN* igvn) {
+  Unique_Node_List worklist;
+  worklist.push(base);
+
+  for (uint next = 0; next < worklist.size(); ++next) {
+    Node* n = worklist.at(next);
+
+    for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
+      Node* m = n->fast_out(i);
+
+      switch (m->Opcode()) {
+        case Op_CastPP:
+        case Op_CheckCastPP:
+        case Op_EncodeP:
+        case Op_EncodePKlass:
+        case Op_DecodeN:
+        case Op_DecodeNKlass:
+          worklist.push(m);
+          break;
+      }
+
+      if (m->is_AddP()) {
+        for (DUIterator_Fast imax, i = m->fast_outs(imax); i < imax; i++) {
+          Node* child = m->fast_out(i);
+
+          if (child->is_Store()) {
+            assert(child->in(0) != NULL || m->in(0) != NULL, "No control for store or AddP.");
+            if (igvn->is_dominator(merge_phi_region, child->in(0) != NULL ? child->in(0) : m->in(0))) {
+              return false;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  return true;
+}
+
+void ConnectionGraph::print_node(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+  if (indentation > 8) {
+    indent(log, indentation);
+    log->print_cr("max_width");
+    return ;
+  }
+
+  if (n == nullptr) {
+    indent(log, indentation);
+    log->print_cr("nullptr");
+    return ;
+  }
+
+  if (n->is_Phi()) {
+    print_phi(n, indentation);
+  } else if (n->is_AddP()) {
+    print_addp(n, indentation);
+  } else if (n->is_ConstraintCast()) {
+    print_cast(n, indentation);
+  } else if (n->is_DecodeN()) {
+    print_decoden(n, indentation);
+  } else if (n->is_Cmp()) {
+    print_cmp(n, indentation);
+  } else if (n->is_Bool()) {
+    print_bool(n, indentation);
+  } else if (n->is_If()) {
+    print_if(n, indentation);
+  } else if (n->is_SafePoint()) {
+    print_call(n, indentation);
+  } else if (n->is_Load()) {
+    print_load(n, indentation);
+  } else if (n->is_Store()) {
+    print_store(n, indentation);
+  } else {
+    indent(log, indentation);
+    log->print_cr("%d %s", n->_idx, n->Name());
+  }
+}
+
+void ConnectionGraph::phi_inputs_info(PhaseIterGVN* igvn, Node* phi, bool& sr_input, bool& nullable, bool& null_input, uint& how_many_nullable) const {
+  for (uint i=1; i<phi->req(); i++) {
+    Node* input = phi->in(i);
+    const Type* input_t = igvn->type(input);
+
+    PointsToNode* input_ptn = ptnode_adr(input->_idx);
+    sr_input |= (input_ptn != NULL && input->is_Allocate() && input_ptn->scalar_replaceable());
+
+    if (input_t->meet(TypePtr::NULL_PTR) == input_t ||
+        input_t->meet(TypeNarrowOop::NULL_PTR) == input_t) {
+      how_many_nullable++;
+
+      if (input->is_Con()) {
+        null_input = true;
+      }
+    }
+  }
+
+  nullable = (how_many_nullable > 0);
+}
+
+void ConnectionGraph::phi_users_info(PhaseIterGVN* igvn, Node* phi, uint& castpp, uint& checkcastpp, uint& cmp, uint& sfpt, uint& other) const {
+  castpp = checkcastpp = cmp = sfpt = other = 0;
+
+  for (uint i=0; i<phi->outcnt(); i++) {
+    Node* user = phi->raw_out(i);
+    uint opc = user->Opcode();
+
+    if (opc == Op_CastPP)
+      castpp++;
+    else if (opc == Op_CheckCastPP)
+      checkcastpp++;
+    else if (opc == Op_CmpP || opc == Op_CmpN)
+      cmp++;
+    else if (user->is_SafePoint())
+      sfpt++;
+    else
+      other++;
+  }
+}
+
+void ConnectionGraph::print_phi(Node* phi, int indentation) const {
+  // If LogPhiStats is not enabled, just return.
+  if (!LogPhiStats) {
+    return ;
+  }
+
+  fileStream* log                  = _compile->phiLog();
+  const Type* phi_t                = _igvn->type(phi);
+
+  bool sr_input                    = false;
+  bool nullable                    = false;
+  bool null_input                  = false;
+  uint how_many_nullable           = 0;
+  uint hm_castpps                  = 0;
+  uint hm_ccpps                    = 0;
+  uint hm_cmps                     = 0;
+  uint hm_sfpts                    = 0;
+  uint hm_others                   = 0;
+  int reduce_status                = phi->as_Phi()->reduce_status();
+
+  bool is_oopptr                   = (phi_t != NULL && phi_t->isa_oopptr() != NULL);
+  bool inst_ptr                    = (phi_t != NULL && phi_t->make_ptr() != NULL && phi_t->make_ptr()->isa_instptr() != NULL);
+  bool ary_ptr                     = (phi_t != NULL && phi_t->make_ptr() != NULL && phi_t->make_ptr()->isa_aryptr() != NULL);
+
+  phi_inputs_info(_igvn, phi, sr_input, nullable, null_input, how_many_nullable);
+  phi_users_info(_igvn, phi, hm_castpps, hm_ccpps, hm_cmps, hm_sfpts, hm_others);
+
+  PointsToNode::EscapeState escape = is_oopptr ? ptnode_adr(phi->_idx)->escape_state() : PointsToNode::NoEscape;
+
+  indent(log, indentation);
+  log->print("%d ", phi->_idx);
+  log->print("%s ", phi->Name());
+  log->print("%s ", escape == 3 ? "GlobalEscape" : escape == 2 ? "ArgEscape" : escape == 1 ? "NoEscape" : "Unknown");
+  log->print("%s ", inst_ptr ? "InstPtr" : ary_ptr ? "AryPtr" : is_oopptr ? "OopPtr" : "NotOopPtr");
+  log->print("%d ", 0);
+  log->print("%d ", 0);
+  log->print("%d ", 0);
+  log->print("reduce_status=%d ", reduce_status);
+  log->print("sr_input=%d ", sr_input);
+  log->print("nullable=%d ", nullable);
+  log->print("null_inp=%d ", null_input);
+  log->print("many_null=%d ", how_many_nullable);
+  log->print("castpps=%d ", hm_castpps);
+  log->print("ccpps=%d ", hm_ccpps);
+  log->print("cmps=%d ", hm_cmps);
+  log->print("sfpts=%d ", hm_sfpts);
+  log->print("others=%d ", hm_others);
+
+  log->print("%d ", phi->req());
+  log->print_cr("%d", phi->outcnt());
+
+  for (uint i=0; i<phi->req(); i++) {
+    Node* in                = phi->in(i);
+    PointsToNode* input_ptn = ptnode_adr(in->_idx);
+    bool is_sr_input        = (input_ptn != NULL && input_ptn->scalar_replaceable());
+    bool is_ro              = is_read_only(phi->in(0), in, _igvn);
+
+    indent(log, indentation+1);
+    log->print_cr("%d %s %d %d %d %d",
+                        in->_idx,
+                        in->Name(),
+                        -1,
+                        -1,
+                        is_sr_input,
+                        is_ro);
+  }
+
+  for (uint i=0; i<phi->outcnt(); i++) {
+    print_node(phi->raw_out(i), indentation+1);
+  }
+}
+
+void ConnectionGraph::print_addp(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  indent(log, indentation);
+  log->print_cr("%d AddP %d", n->_idx, n->outcnt());
+  for (uint i=0; i<n->outcnt(); i++) {
+    print_node(n->raw_out(i), indentation+1);
+  }
+}
+
+static bool cast_control_from_local_cmp(Node* cast) {
+  Node* ctrl = cast->in(0);
+  if (ctrl == nullptr) return false;
+
+  // Check if the control of the cast is a branch of an If using a
+  // Cmp on the Phi input.
+  if (ctrl->is_IfTrue() || ctrl->is_IfFalse()) {
+    Node* iff = ctrl->in(0);
+    Node* cmp = iff->in(1)->in(1); // iff->bool->cmp
+
+    // Check if the Cmp is using same Phi as the Cast
+    return cmp->is_Cmp() &&
+           (cmp->in(1) == cast->in(1) ||
+            cmp->in(2) == cast->in(1));
+  }
+
+  return false;
+}
+
+static bool cast_control_same_as_phi(Node* cast) {
+  Node* ctrl = cast->in(0);
+  if (ctrl == nullptr) return false;
+  if (!cast->in(1)->is_Phi()) return false;
+
+  return cast->in(1)->in(0) == ctrl;
+}
+
+static void checkcast_info(Node* cast, bool& schk, bool& cmp, bool& fls, bool& phi, bool& region, bool& same_region, bool& proj) {
+  Node* ctrl = cast->in(0);
+  Node* input = cast->in(1);
+  if (ctrl == nullptr) return ;
+
+  phi = (input != nullptr) && input->is_Phi();
+
+  if (ctrl->is_IfTrue() || ctrl->is_IfFalse()) {
+    Node* iff = ctrl->in(0);
+    Node* subchk = iff->in(1)->in(1); // iff->bool->SubTypeCheck
+
+    schk = subchk->is_SubTypeCheck();
+    cmp = subchk->is_Cmp();
+
+    // cast->phi->region ; Check if the control of the If is the same Region as the Phi used in the cast
+    fls = (iff->in(0) == input->in(0));
+  } else if (ctrl->is_Region()) {
+    region = true;
+    same_region = (ctrl == input->in(0));
+  } else if (ctrl->is_Proj()) {
+    proj = true;
+  }
+}
+
+void ConnectionGraph::print_cast(Node* cast, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  int control = cast->in(0) == nullptr ? -1 : cast->in(0)->_idx;
+  bool flc = cast_control_from_local_cmp(cast);
+  bool sapc = cast_control_same_as_phi(cast);
+  bool schk = false; bool region      = false; bool phi = false;
+  bool cmp  = false; bool same_region = false;
+  bool fls  = false; bool proj        = false;
+  checkcast_info(cast, schk, cmp, fls, phi, region, same_region, proj);
+
+  indent(log, indentation);
+  log->print_cr("%d %s ctrl=%d flc=%d sap=%d schk=%d cmp=%d fls=%d phi=%d region=%d same_region=%d proj=%d %d", cast->_idx, cast->Name(), control, flc, sapc, schk, cmp, fls, phi,region, same_region, proj, cast->outcnt());
+
+  for (uint i=0; i<cast->outcnt(); i++) {
+    print_node(cast->raw_out(i), indentation+1);
+  }
+}
+
+void ConnectionGraph::print_decoden(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  indent(log, indentation);
+  log->print_cr("%d DecodeN %d", n->_idx, n->outcnt());
+  for (uint i=0; i<n->outcnt(); i++) {
+    print_node(n->raw_out(i), indentation+1);
+  }
+}
+
+void ConnectionGraph::print_cmp(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  bool cmp_with_null = false;
+  if (n->in(1)->is_Con()) {
+    const Type* input_t = _igvn->type(n->in(1));
+    if (input_t == TypePtr::NULL_PTR || input_t == TypeNarrowOop::NULL_PTR) {
+      cmp_with_null = true;
+    }
+  }
+
+  if (n->in(2)->is_Con()) {
+    const Type* input_t = _igvn->type(n->in(2));
+    if (input_t == TypePtr::NULL_PTR || input_t == TypeNarrowOop::NULL_PTR) {
+      cmp_with_null = true;
+    }
+  }
+
+  indent(log, indentation);
+  log->print_cr("%d %s cn=%d %d", n->_idx, n->Name(), cmp_with_null, n->outcnt());
+  for (uint i=0; i<n->outcnt(); i++) {
+    print_node(n->raw_out(i), indentation+1);
+  }
+}
+
+void ConnectionGraph::print_bool(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  indent(log, indentation);
+  log->print_cr("%d %s %d", n->_idx, n->Name(), n->outcnt());
+  for (uint i=0; i<n->outcnt(); i++) {
+    print_node(n->raw_out(i), indentation+1);
+  }
+}
+
+void ConnectionGraph::print_if(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  int control = n->in(0) == nullptr ? -1 : n->in(0)->_idx;
+
+  indent(log, indentation);
+  log->print_cr("%d %s ctrl=%d %d", n->_idx, n->Name(), control, n->outcnt());
+  for (uint i=0; i<n->outcnt(); i++) {
+    print_node(n->raw_out(i), indentation+1);
+  }
+}
+
+void ConnectionGraph::print_call(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  indent(log, indentation);
+  log->print_cr("%d Call 0", n->_idx);
+}
+
+void ConnectionGraph::print_load(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  indent(log, indentation);
+  log->print_cr("%d Load 0", n->_idx);
+}
+
+void ConnectionGraph::print_store(Node* n, int indentation) const {
+  fileStream* log = _compile->phiLog();
+
+  indent(log, indentation);
+  log->print_cr("%d Store 0", n->_idx);
+}
+
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
   // If ReduceAllocationMerges is enabled we might call split_through_phi during
   // split_unique_types and that will create additional nodes that need to be
@@ -253,23 +609,6 @@ bool ConnectionGraph::compute_escape() {
     add_final_edges(n);
   }
 
-#ifdef ASSERT
-  if (VerifyConnectionGraph) {
-    // Verify that no new simple edges could be created and all
-    // local vars has edges.
-    _verify = true;
-    int ptnodes_length = ptnodes_worklist.length();
-    for (int next = 0; next < ptnodes_length; ++next) {
-      PointsToNode* ptn = ptnodes_worklist.at(next);
-      add_final_edges(ptn->ideal_node());
-      if (ptn->is_LocalVar() && ptn->edge_count() == 0) {
-        ptn->dump();
-        assert(ptn->as_LocalVar()->edge_count() > 0, "sanity");
-      }
-    }
-    _verify = false;
-  }
-#endif
   // Bytecode analyzer BCEscapeAnalyzer, used for Call nodes
   // processing, calls to CI to resolve symbols (types, fields, methods)
   // referenced in bytecode. During symbol resolution VM may throw
@@ -333,21 +672,7 @@ bool ConnectionGraph::compute_escape() {
     }
   }
 
-#ifdef ASSERT
-  if (VerifyConnectionGraph) {
-    // Verify that graph is complete - no new edges could be added or needed.
-    verify_connection_graph(ptnodes_worklist, non_escaped_allocs_worklist,
-                            java_objects_worklist, addp_worklist);
-  }
-  assert(C->unique() == nodes_size(), "no new ideal nodes should be added during ConnectionGraph build");
-  assert(null_obj->escape_state() == PointsToNode::NoEscape &&
-         null_obj->edge_count() == 0 &&
-         !null_obj->arraycopy_src() &&
-         !null_obj->arraycopy_dst(), "sanity");
-#endif
-
   _collecting = false;
-
   } // TracePhase t3("connectionGraph")
 
   // 4. Optimize ideal graph based on EA information.
@@ -356,22 +681,35 @@ bool ConnectionGraph::compute_escape() {
     optimize_ideal_graph(ptr_cmp_worklist, storestore_worklist);
   }
 
-#ifndef PRODUCT
-  if (PrintEscapeAnalysis) {
-    dump(ptnodes_worklist); // Dump ConnectionGraph
-  }
-#endif
-
-#ifdef ASSERT
-  if (VerifyConnectionGraph) {
-    int alloc_length = alloc_worklist.length();
-    for (int next = 0; next < alloc_length; ++next) {
-      Node* n = alloc_worklist.at(next);
-      PointsToNode* ptn = ptnode_adr(n->_idx);
-      assert(ptn->escape_state() == PointsToNode::NoEscape && ptn->scalar_replaceable(), "sanity");
-    }
-  }
-#endif
+//  if (LogPhiStats && _invocation == 0) {
+//    fileStream* log = _compile->phiLog();
+//
+//    Unique_Node_List phis;
+//    int nodes_length = _nodes.length();
+//
+//    // This is just to count how many Phis will be print
+//    for (int next = 0; next < nodes_length; ++next) {
+//      PointsToNode* ptn = _nodes.at(next);
+//
+//      if (ptn == NULL || ptn->ideal_node() == NULL || !ptn->ideal_node()->is_Phi()) { continue ; }
+//
+//      Node* phi          = ptn->ideal_node();
+//      const Type* phi_t  = _igvn->type(phi);
+//
+//      if (phi_t != NULL && phi_t->make_ptr() != NULL) {
+//        phis.push(phi);
+//      }
+//    }
+//
+//    log->print_cr("%s::%s %d",
+//        _compile->method()->holder()->name()->as_utf8(),
+//        _compile->method()->name()->as_utf8(),
+//        phis.size());
+//
+//    for (uint next = 0; next < phis.size(); ++next) {
+//      print_node(phis.at(next), 0);
+//    }
+//  }
 
   // 5. Separate memory graph for scalar replaceable allcations.
   bool has_scalar_replaceable_candidates = (alloc_worklist.length() > 0);
@@ -446,7 +784,7 @@ bool ConnectionGraph::compute_escape() {
 
 // Check if it's profitable to reduce the Phi passed as parameter.  Returns true
 // if at least one scalar replaceable allocation participates in the merge.
-bool ConnectionGraph::can_reduce_phi_check_inputs(PhiNode* ophi) const {
+bool ConnectionGraph::can_reduce_phi_check_inputs(PhiNode* ophi, int& can_reduce_status) const {
   bool found_sr_allocate = false;
 
   for (uint i = 1; i < ophi->req(); i++) {
@@ -463,6 +801,9 @@ bool ConnectionGraph::can_reduce_phi_check_inputs(PhiNode* ophi) const {
       }
     }
   }
+
+  if (!found_sr_allocate)
+    can_reduce_status = 1;
 
   NOT_PRODUCT(if (TraceReduceAllocationMerges && !found_sr_allocate) tty->print_cr("Can NOT reduce Phi %d on invocation %d. No SR Allocate as input.", ophi->_idx, _invocation);)
   return found_sr_allocate;
@@ -488,13 +829,14 @@ bool ConnectionGraph::can_reduce_cmp(Node* n, Node* cmp) const {
 //  - Phi -> AddP -> Load
 //  - Phi -> CastPP -> SafePoints
 //  - Phi -> CastPP -> AddP -> Load
-bool ConnectionGraph::can_reduce_check_users(Node* n, uint nesting) const {
+bool ConnectionGraph::can_reduce_check_users(Node* n, uint nesting, int& can_reduce_status) const {
   for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
     Node* use = n->fast_out(i);
 
     if (use->is_SafePoint()) {
       if (use->is_Call() && use->as_Call()->has_non_debug_use(n)) {
         NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. Call has non_debug_use().", n->_idx, _invocation);)
+        can_reduce_status = 2;
         return false;
       }
     } else if (use->is_AddP()) {
@@ -503,17 +845,19 @@ bool ConnectionGraph::can_reduce_check_users(Node* n, uint nesting) const {
         Node* use_use = addp->fast_out(j);
         if (!use_use->is_Load() || !use_use->as_Load()->can_split_through_phi_base(_igvn)) {
           NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. AddP user isn't a [splittable] Load(): %s", n->_idx, _invocation, use_use->Name());)
+          can_reduce_status = 3;
           return false;
         }
       }
     } else if (nesting > 0) {
       NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. Unsupported user %s at nesting level %d.", n->_idx, _invocation, use->Name(), nesting);)
+      can_reduce_status = 4;
       return false;
     } else if (use->is_CastPP()) {
       const Type* cast_t = _igvn->type(use);
       if (cast_t == nullptr || cast_t->make_ptr()->isa_instptr() == nullptr) {
-        NOT_PRODUCT(use->dump();)
         NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. CastPP is not to an instance.", n->_idx, _invocation);)
+        can_reduce_status = 5;
         return false;
       }
 
@@ -526,22 +870,25 @@ bool ConnectionGraph::can_reduce_check_users(Node* n, uint nesting) const {
           Node* iff_cmp = iff->in(1)->in(1); // if->bool->cmp
           if (!can_reduce_cmp(n, iff_cmp)) {
             NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. CastPP %d doesn't have simple control.", n->_idx, _invocation, use->_idx);)
-            NOT_PRODUCT(n->dump(5);)
+            can_reduce_status = 6;
             return false;
           }
         }
       }
 
-      if (!can_reduce_check_users(use, nesting+1)) {
+      if (!can_reduce_check_users(use, nesting+1, can_reduce_status)) {
+        can_reduce_status = 100 + can_reduce_status;
         return false;
       }
     } else if (use->Opcode() == Op_CmpP || use->Opcode() == Op_CmpN) {
       if (!can_reduce_cmp(n, use)) {
         NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. CmpP/N %d isn't reducible.", n->_idx, _invocation, use->_idx);)
+        can_reduce_status = 7;
         return false;
       }
     } else {
       NOT_PRODUCT(if (TraceReduceAllocationMerges) tty->print_cr("Can NOT reduce Phi %d on invocation %d. One of the uses is: %d %s", n->_idx, _invocation, use->_idx, use->Name());)
+      can_reduce_status = 8;
       return false;
     }
   }
@@ -559,6 +906,8 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
   // disabled.
   // If EliminateAllocations is False, there is no point in reducing merges.
   if (!_compile->do_reduce_allocation_merges()) {
+    ophi->reduce_status(-2);
+    print_node(ophi, 0);
     return false;
   }
 
@@ -566,14 +915,21 @@ bool ConnectionGraph::can_reduce_phi(PhiNode* ophi) const {
   if (phi_t == nullptr ||
       phi_t->make_ptr() == nullptr ||
       phi_t->make_ptr()->isa_aryptr() != nullptr) {
+    ophi->reduce_status(-1);
+    print_node(ophi, 0);
     return false;
   }
 
-  if (!can_reduce_phi_check_inputs(ophi) || !can_reduce_check_users(ophi, /* nesting: */ 0)) {
+  int can_reduce_status = 0;
+  if (!can_reduce_phi_check_inputs(ophi, can_reduce_status) || !can_reduce_check_users(ophi, /* nesting: */ 0, can_reduce_status)) {
+    ophi->reduce_status(can_reduce_status);
+    print_node(ophi, 0);
     return false;
   }
 
   NOT_PRODUCT(if (TraceReduceAllocationMerges) { tty->print_cr("Can reduce Phi %d during invocation %d: ", ophi->_idx, _invocation); })
+  ophi->reduce_status(0);
+  print_node(ophi, 0);
   return true;
 }
 

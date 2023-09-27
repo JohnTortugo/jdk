@@ -355,6 +355,7 @@ class Compile : public Phase {
   ciEnv*                _env;                   // CI interface
   DirectiveSet*         _directive;             // Compiler directive
   CompileLog*           _log;                   // from CompilerThread
+  fileStream*           _phiLog;                // Log file for storing Phi stats infos
   const char*           _failure_reason;        // for record_failure/failing pattern
   GrowableArray<CallGenerator*> _intrinsics;    // List of intrinsics.
   GrowableArray<Node*>  _macro_nodes;           // List of nodes which need to be expanded before matching.
@@ -793,6 +794,7 @@ private:
   Arena*      comp_arena()           { return &_comp_arena; }
   ciEnv*      env() const            { return _env; }
   CompileLog* log() const            { return _log; }
+  fileStream* phiLog() const         { return _phiLog; }
   bool        failing() const        { return _env->failing() || _failure_reason != nullptr; }
   const char* failure_reason() const { return (_env->failing()) ? _env->failure_reason() : _failure_reason; }
 

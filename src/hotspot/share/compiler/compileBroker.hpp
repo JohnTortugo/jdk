@@ -169,6 +169,7 @@ class CompileBroker: AllStatic {
 
   // An array of compiler logs
   static CompileLog **_compiler1_logs, **_compiler2_logs;
+  static fileStream** _compiler2_phiLogs;
 
   // These counters are used for assigning id's to each compilation
   static volatile jint _compilation_id;
@@ -294,6 +295,7 @@ public:
   static void compilation_init_phase1(JavaThread* THREAD);
   static void compilation_init_phase2();
   static void init_compiler_thread_log();
+  static void init_compiler_thread_philog();
   static nmethod* compile_method(const methodHandle& method,
                                  int osr_bci,
                                  int comp_level,
@@ -397,6 +399,7 @@ public:
   static bool can_remove(CompilerThread *ct, bool do_it);
 
   static CompileLog* get_log(CompilerThread* ct);
+  static fileStream* get_phiLog(CompilerThread* ct);
 
   static int get_total_compile_count() {            return _total_compile_count; }
   static int get_total_bailout_count() {            return _total_bailout_count; }

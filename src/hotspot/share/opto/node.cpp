@@ -2437,9 +2437,7 @@ void Node::dump_name(outputStream* st, DumpConfig* dc) const {
   }
 }
 
-// -----------------------------Name-------------------------------------------
-extern const char *NodeClassNames[];
-const char *Node::Name() const { return NodeClassNames[Opcode()]; }
+
 
 static bool is_disconnected(const Node* n) {
   for (uint i = 0; i < n->req(); i++) {
@@ -2746,6 +2744,10 @@ void Node::verify(int verify_depth, VectorSet& visited, Node_List& worklist) {
   }
 }
 #endif // not PRODUCT
+
+// This call defines a class-unique string used to identify class instances
+extern const char* NodeClassNames[];
+const char* Node::Name() const { return NodeClassNames[Opcode()]; }
 
 //------------------------------Registers--------------------------------------
 // Do we Match on this edge index or not?  Generally false for Control

@@ -47,6 +47,7 @@ class CompilerThread : public JavaThread {
 
   ciEnv*                _env;
   CompileLog*           _log;
+  fileStream*           _phiLog;
   CompileTask* volatile _task;  // print_threads_compiling can read this concurrently.
   CompileQueue*         _queue;
   BufferBlob*           _buffer_blob;
@@ -95,6 +96,14 @@ class CompilerThread : public JavaThread {
     // Set once, for good.
     assert(_log == nullptr, "set only once");
     _log = log;
+  }
+
+  // Get/set the thread's logging information
+  fileStream* phiLog() { return _phiLog; }
+  void          init_phiLog(fileStream* phiLog) {
+    // Set once, for good.
+    assert(_phiLog == NULL, "set only once");
+    _phiLog = phiLog;
   }
 
   void start_idle_timer()                        { _idle_time.update(); }

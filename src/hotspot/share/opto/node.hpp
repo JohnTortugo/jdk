@@ -1256,12 +1256,11 @@ public:
 
   static void verify(int verify_depth, VectorSet& visited, Node_List& worklist);
 
-  // This call defines a class-unique string used to identify class instances
-  virtual const char *Name() const;
-
   void dump_format(PhaseRegAlloc *ra) const; // debug access to MachNode::format(...)
   static bool in_dump() { return Compile::current()->_in_dump_cnt > 0; } // check if we are in a dump call
 #endif
+  // This call defines a class-unique string used to identify class instances
+  virtual const char* Name() const;
 #ifdef ASSERT
   void verify_construction();
   bool verify_jvms(const JVMState* jvms) const;

@@ -158,6 +158,7 @@ class JProjNode : public ProjNode {
 class PhiNode : public TypeNode {
   friend class PhaseRenumberLive;
 
+  int _reduce_status;
   const TypePtr* const _adr_type; // non-null only for Type::MEMORY nodes.
   // The following fields are only used for data PhiNodes to indicate
   // that the PhiNode represents the value of a known instance field.
@@ -217,6 +218,9 @@ public:
   RegionNode* region() const { Node* r = in(Region); assert(!r || r->is_Region(), ""); return (RegionNode*)r; }
 
   bool is_tripcount(BasicType bt) const;
+
+  int reduce_status() { return _reduce_status; }
+  void reduce_status(int status) { _reduce_status = status; }
 
   // Determine a unique non-trivial input, if any.
   // Ignore casts if it helps.  Return null on failure.

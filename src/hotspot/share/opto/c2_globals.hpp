@@ -121,6 +121,9 @@
   notproduct(bool, VerifyIdealNodeCount, false,                             \
           "Verify that tracked dead ideal node count is accurate")          \
                                                                             \
+  product(bool, LogPhiStats, false,                                         \
+          "Log information about C2 Phis")                                  \
+                                                                            \
   notproduct(bool, PrintIdealNodeCount, false,                              \
           "Print liveness counts of ideal nodes")                           \
                                                                             \

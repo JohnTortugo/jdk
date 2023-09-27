@@ -64,6 +64,7 @@ private:
   int              _num_inlined_bytecodes;
   CompileTask*     _task;           // faster access to CompilerThread::task
   CompileLog*      _log;            // faster access to CompilerThread::log
+  fileStream*      _phiLog;         // for storing Phi Stats info
   void*            _compiler_data;  // compiler-specific stuff, if any
 
   char* _name_buffer;
@@ -457,6 +458,9 @@ public:
   // Output stream for logging compilation info.
   CompileLog* log() { return _log; }
   void set_log(CompileLog* log) { _log = log; }
+
+  fileStream* phiLog() { return _phiLog; }
+  void set_phiLog(fileStream* phiLog) { _phiLog = phiLog; }
 
   void record_failure(const char* reason);      // Record failure and report later
   void report_failure(const char* reason);      // Report failure immediately

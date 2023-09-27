@@ -34,6 +34,7 @@ CompilerThread::CompilerThread(CompileQueue* queue,
                                : JavaThread(&CompilerThread::thread_entry) {
   _env   = nullptr;
   _log   = nullptr;
+  _phiLog = NULL;
   _task  = nullptr;
   _queue = queue;
   _counters = counters;
