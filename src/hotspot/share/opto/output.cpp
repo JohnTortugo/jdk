@@ -1805,11 +1805,12 @@ void PhaseOutput::fill_buffer(C2_MacroAssembler* masm, uint* blk_starts) {
   }
 
   BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
-  bs->emit_stubs(masm);
+  bs->emit_stubs(*masm->code());
   if (C->failing())  return;
 
   // Fill in stubs.
-  _stub_list.emit(masm);
+  assert(masm->inst_mark() == nullptr, "should be.");
+  _stub_list.emit(*masm);
   if (C->failing())  return;
 
 #ifndef PRODUCT
@@ -1841,7 +1842,7 @@ void PhaseOutput::fill_buffer(C2_MacroAssembler* masm, uint* blk_starts) {
   }
 
   // One last check for failed CodeBuffer::expand:
-  if ((cb->blob() == nullptr) || (!CompileBroker::should_compile_new_jobs())) {
+  if ((masm->code()->blob() == nullptr) || (!CompileBroker::should_compile_new_jobs())) {
     C->record_failure("CodeCache is full");
     return;
   }
@@ -3297,7 +3298,7 @@ uint PhaseOutput::scratch_emit_size(const Node* n) {
   Label*   saveL = nullptr;
   uint save_bnum = 0;
   bool is_branch = n->is_MachBranch();
-  MacroAssembler masm(&buf);
+  C2_MacroAssembler masm(&buf);
   masm.bind(fakeL);
   if (is_branch) {
     n->as_MachBranch()->save_label(&saveL, &save_bnum);

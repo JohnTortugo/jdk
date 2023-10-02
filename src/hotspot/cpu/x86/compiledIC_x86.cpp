@@ -35,7 +35,7 @@
 // ----------------------------------------------------------------------------
 
 #define __ masm->
-address CompiledStaticCall::emit_to_interp_stub(C2_MacroAssembler *masm, address mark) {
+address CompiledStaticCall::emit_to_interp_stub(MacroAssembler *masm, address mark) {
   // Stub is fixed up when the corresponding call is converted from
   // calling compiled code to calling interpreted code.
   // movq rbx, 0

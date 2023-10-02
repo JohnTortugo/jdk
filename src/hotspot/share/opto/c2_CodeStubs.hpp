@@ -52,7 +52,7 @@ public:
   Label& entry()        { return _entry; }
   Label& continuation() { return _continuation; }
 
-  virtual void emit(C2_MacroAssembler* masm) = 0;
+  virtual void emit(C2_MacroAssembler& masm) = 0;
   virtual int max_size() const = 0;
 
   template <class... Ts>
@@ -68,7 +68,7 @@ public:
   C2CodeStubList();
 
   void add_stub(C2CodeStub* stub) { _stubs.append(stub); }
-  void emit(C2_MacroAssembler* masm);
+  void emit(C2_MacroAssembler& masm);
 };
 
 class C2SafepointPollStub : public C2CodeStub {

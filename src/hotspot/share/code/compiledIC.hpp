@@ -341,7 +341,7 @@ class CompiledStaticCall : public ResourceObj {
   // Code
 
   // Returns null if CodeBuffer::expand fails
-  static address emit_to_interp_stub(C2_MacroAssembler *masm, address mark = nullptr);
+  static address emit_to_interp_stub(MacroAssembler *masm, address mark = nullptr);
   static int to_interp_stub_size();
   static int to_trampoline_stub_size();
   static int reloc_to_interp_stub();
