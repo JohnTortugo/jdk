@@ -484,7 +484,7 @@ void encode_Copy( C2_MacroAssembler *masm, int dst_encoding, int src_encoding ) 
   }
 }
 
-void emit_cmpfp_fixup(MacroAssembler& masm) {
+void emit_cmpfp_fixup(MacroAssembler* masm) {
   Label exit;
   __ jccb(Assembler::noParity, exit);
   __ pushf();
@@ -504,7 +504,7 @@ void emit_cmpfp_fixup(MacroAssembler& masm) {
   __ bind(exit);
 }
 
-void emit_cmpfp3(MacroAssembler& masm, Register dst) {
+void emit_cmpfp3(MacroAssembler* masm, Register dst) {
   Label done;
   __ movl(dst, -1);
   __ jcc(Assembler::parity, done);
@@ -669,11 +669,11 @@ void MachEpilogNode::emit(C2_MacroAssembler *masm, PhaseRegAlloc *ra_) const {
   if (C->max_vector_size() > 16) {
     // Clear upper bits of YMM registers when current compiled code uses
     // wide vectors to avoid AVX <-> SSE transition penalty during call.
-    masm->vzeroupper();
+    __ vzeroupper();
   }
   // If method set FPU control word, restore to standard control word
   if (C->in_24_bit_fp_mode()) {
-    masm->fldcw(ExternalAddress(StubRoutines::x86::addr_fpu_cntrl_wrd_std()));
+    __ fldcw(ExternalAddress(StubRoutines::x86::addr_fpu_cntrl_wrd_std()));
   }
 
   int framesize = C->output()->frame_size_in_bytes();
@@ -778,7 +778,7 @@ static int impl_x_helper( C2_MacroAssembler *masm, bool do_size, bool is_load,
   if (masm) {
     // EVEX spills remain EVEX: Compressed displacemement is better than AVX on spill mem operations,
     //                          it maps more cases to single byte displacement
-    masm->set_managed();
+    __ set_managed();
     if (reg_lo+1 == reg_hi) { // double move?
       if (is_load) {
         __ movdbl(as_XMMRegister(Matcher::_regEncode[reg_lo]), Address(rsp, offset));
@@ -1374,15 +1374,15 @@ void MachUEPNode::emit(C2_MacroAssembler *masm, PhaseRegAlloc *ra_) const {
 #ifdef ASSERT
   uint insts_size = __ offset();
 #endif
-  masm->cmpptr(rax, Address(rcx, oopDesc::klass_offset_in_bytes()));
-  masm->jump_cc(Assembler::notEqual,
+  __ cmpptr(rax, Address(rcx, oopDesc::klass_offset_in_bytes()));
+  __ jump_cc(Assembler::notEqual,
                RuntimeAddress(SharedRuntime::get_ic_miss_stub()));
   /* WARNING these NOPs are critical so that verified entry point is properly
      aligned for patching by NativeJump::patch_verified_entry() */
   int nops_cnt = 2;
   if( !OptoBreakpoint ) // Leave space for int3
      nops_cnt += 1;
-  masm->nop(nops_cnt);
+  __ nop(nops_cnt);
 
   assert(__ offset() - insts_size == size(ra_), "checking code size of inline cache node");
 }
@@ -1527,6 +1527,18 @@ encode %{
   // main source block for now.  In future, we can generalize this by
   // adding a syntax that specifies the sizes of fields in an order,
   // so that the adlc can build the emit functions automagically
+
+  // Set instruction mark in MacroAssembler. This is used only in
+  // instructions that emit bytes directly to the CodeBuffer wraped
+  // in the MacroAssembler. Should go away once all "instruct" are
+  // patched to emit bytes only using methods in MacroAssembler.
+  enc_class SetInstMark %{
+    __ set_inst_mark();
+  %}
+
+  enc_class ClearInstMark %{
+    __ clear_inst_mark();
+  %}
 
   // Emit primary opcode
   enc_class OpcP %{
@@ -1778,7 +1790,7 @@ encode %{
 
   enc_class pre_call_resets %{
     // If method sets FPU control word restore it here
-    debug_only(int off0 = mas->offset());
+    debug_only(int off0 = __ offset());
     if (ra_->C->in_24_bit_fp_mode()) {
       __ fldcw(ExternalAddress(StubRoutines::x86::addr_fpu_cntrl_wrd_std()));
     }
@@ -1803,7 +1815,7 @@ encode %{
     $$$emit8$primary;
 
     if (!_method) {
-      emit_d32_reloc(masm, ($meth$$method - (int)(masm->pc()) - 4),
+      emit_d32_reloc(masm, ($meth$$method - (int)(__ pc()) - 4),
                      runtime_call_Relocation::spec(),
                      RELOC_IMM32);
       __ post_call_nop();
@@ -1818,7 +1830,7 @@ encode %{
       if (CodeBuffer::supports_shared_stubs() && _method->can_be_statically_bound()) {
         // Calls of the same statically bound method can share
         // a stub to the interpreter.
-        masm->code()->shared_stub_to_interp_for(_method, __ code()->insts()->mark_off());
+        __ code()->shared_stub_to_interp_for(_method, __ code()->insts()->mark_off());
       } else {
         // Emit stubs for static call.
         address stub = CompiledStaticCall::emit_to_interp_stub(masm, mark);
@@ -2750,7 +2762,7 @@ encode %{
     // CALL directly to the runtime
     __ set_inst_mark();
     emit_opcode(masm,0xE8);       // Call into runtime
-    emit_d32_reloc(masm, (CAST_FROM_FN_PTR(address, SharedRuntime::ldiv) - __ insts_end()) - 4, runtime_call_Relocation::spec(), RELOC_IMM32 );
+    emit_d32_reloc(masm, (CAST_FROM_FN_PTR(address, SharedRuntime::ldiv) - __ pc()) - 4, runtime_call_Relocation::spec(), RELOC_IMM32 );
     __ post_call_nop();
     // Restore stack
     emit_opcode(masm, 0x83); // add  SP, #framesize
