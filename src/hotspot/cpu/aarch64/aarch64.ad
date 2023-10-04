@@ -1799,7 +1799,7 @@ void MachPrologNode::emit(C2_MacroAssembler *masm, PhaseRegAlloc *ra_) const {
         guard = &stub->guard();
       }
       // In the C2 code, we move the non-hot part of nmethod entry barriers out-of-line to a stub.
-      bs->nmethod_entry_barrier(&_masm, slow_path, continuation, guard);
+      bs->nmethod_entry_barrier(masm, slow_path, continuation, guard);
     }
   }
 
@@ -1986,7 +1986,7 @@ uint MachSpillCopyNode::implementation(C2_MacroAssembler *masm, PhaseRegAlloc *r
       } else {
         ShouldNotReachHere();
       }
-    } else if (mam) {
+    } else if (masm) {
       assert(ireg == Op_VecD || ireg == Op_VecX, "must be 64 bit or 128 bit vector");
       assert((src_lo_rc != rc_int && dst_lo_rc != rc_int), "sanity");
       if (src_lo_rc == rc_stack && dst_lo_rc == rc_stack) {
