@@ -34,8 +34,8 @@
 
 // ----------------------------------------------------------------------------
 
-#define __ masm.
-address CompiledStaticCall::emit_to_interp_stub(MacroAssembler &masm, address mark) {
+#define __ masm->
+address CompiledStaticCall::emit_to_interp_stub(MacroAssembler *masm, address mark) {
   precond(__ code()->stubs()->start() != badAddress);
   precond(__ code()->stubs()->end() != badAddress);
 

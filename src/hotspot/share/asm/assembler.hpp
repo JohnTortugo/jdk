@@ -364,6 +364,7 @@ class AbstractAssembler : public ResourceObj  {
   CodeSection*  code_section() const   { return _code_section; }
   CodeBuffer*   code()         const   { return code_section()->outer(); }
   int           sect()         const   { return code_section()->index(); }
+  address       begin()        const   { return code_section()->start();   }
   address       pc()           const   { return code_section()->end();   }
   int           offset()       const   { return code_section()->size();  }
   int           locator()      const   { return CodeBuffer::locator(offset(), sect()); }
@@ -375,9 +376,7 @@ class AbstractAssembler : public ResourceObj  {
 
   address       inst_mark() const         { return code_section()->mark();          }
   void      set_inst_mark()               {        code_section()->set_mark();      }
-  void      set_inst_mark(address addr)   {        code_section()->set_mark(addr);  }
   void    clear_inst_mark()               {        code_section()->clear_mark();    }
-  void set_inst_end(address addr)         {        code_section()->set_end(addr);   }
 
   // Constants in code
   void relocate(RelocationHolder const& rspec, int format = 0) {

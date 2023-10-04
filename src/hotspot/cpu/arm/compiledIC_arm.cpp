@@ -34,9 +34,9 @@
 
 // ----------------------------------------------------------------------------
 #if COMPILER2_OR_JVMCI
-#define __ masm.
+#define __ masm->
 // emit call stub, compiled java to interpreter
-address CompiledStaticCall::emit_to_interp_stub(MacroAssembler &masm, address mark) {
+address CompiledStaticCall::emit_to_interp_stub(MacroAssembler *masm, address mark) {
   // Stub is fixed up when the corresponding call is converted from calling
   // compiled code to calling interpreted code.
   // set (empty), R9
