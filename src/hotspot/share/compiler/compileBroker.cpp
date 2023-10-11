@@ -137,6 +137,7 @@ jobject* CompileBroker::_compiler2_objects = nullptr;
 
 CompileLog** CompileBroker::_compiler1_logs = nullptr;
 CompileLog** CompileBroker::_compiler2_logs = nullptr;
+fileStream** CompileBroker::_compiler2_objectsESLogs = NULL;
 
 // These counters are used to assign an unique ID to each compilation.
 volatile jint CompileBroker::_compilation_id     = 0;
@@ -928,6 +929,7 @@ void CompileBroker::init_compiler_threads() {
     _c2_compile_queue  = new CompileQueue(name);
     _compiler2_objects = NEW_C_HEAP_ARRAY(jobject, _c2_count, mtCompiler);
     _compiler2_logs = NEW_C_HEAP_ARRAY(CompileLog*, _c2_count, mtCompiler);
+    _compiler2_objectsESLogs = NEW_C_HEAP_ARRAY(fileStream*, _c2_count, mtCompiler);
   }
   if (_c1_count > 0) {
     _c1_compile_queue  = new CompileQueue("C1 compile queue");
@@ -949,6 +951,7 @@ void CompileBroker::init_compiler_threads() {
     JVMCI_ONLY(})
     _compiler2_objects[i] = thread_handle;
     _compiler2_logs[i] = nullptr;
+    _compiler2_objectsESLogs[i] = NULL;
 
     if (!UseDynamicNumberOfCompilerThreads || i == 0) {
       JavaThread *ct = make_thread(compiler_t, thread_handle, _c2_compile_queue, _compilers[1], THREAD);
@@ -1859,6 +1862,49 @@ CompileLog* CompileBroker::get_log(CompilerThread* ct) {
   return log;
 }
 
+/**
+ * Helper function to create new or reuse old CompileLog.
+ */
+fileStream* CompileBroker::get_objectsESLog(CompilerThread* ct) {
+  AbstractCompiler* compiler = ct->compiler();
+  bool c1 = compiler->is_c1();
+  if (c1) return NULL;
+
+  jobject* compiler_objects = _compiler2_objects;
+  assert(compiler_objects != NULL, "must be initialized at this point");
+  fileStream** philogs = _compiler2_objectsESLogs;
+  assert(philogs != NULL, "must be initialized at this point");
+  int count = _c2_count;
+
+  // Find Compiler number by its threadObj.
+  oop compiler_obj = ct->threadObj();
+  int compiler_number = 0;
+  bool found = false;
+  for (; compiler_number < count; compiler_number++) {
+      if (JNIHandles::resolve_non_null(compiler_objects[compiler_number]) == compiler_obj) {
+          found = true;
+          break;
+      }
+  }
+  assert(found, "Compiler must exist at this point");
+
+  // Determine pointer for this thread's log.
+  fileStream** log_ptr = &philogs[compiler_number];
+
+  // Return old one if it exists.
+  fileStream* log = *log_ptr;
+  if (log != NULL) {
+      ct->init_ObjectsESLog(log);
+      return log;
+  }
+
+  // Create a new one and remember it.
+  init_compiler_thread_objects_es_log();
+  log = ct->objectsESLog();
+  *log_ptr = log;
+  return log;
+}
+
 // ------------------------------------------------------------------
 // CompileBroker::compiler_thread_loop
 //
@@ -1890,6 +1936,9 @@ void CompileBroker::compiler_thread_loop() {
     log->stamp();
     log->end_elem();
   }
+
+  // Open a Phi log.
+  fileStream* phiLog = get_objectsESLog(thread);
 
   // If compiler thread/runtime initialization fails, exit the compiler thread
   if (!init_compiler_runtime()) {
@@ -2003,6 +2052,38 @@ void CompileBroker::init_compiler_thread_log() {
       }
     }
     warning("Cannot open log file: %s", file_name);
+}
+
+// Set up state required by +LogCompilation.
+void CompileBroker::init_compiler_thread_objects_es_log() {
+  CompilerThread* thread = CompilerThread::current();
+  char  file_name[4 * K];
+  FILE* fp = NULL;
+  intx thread_id = os::current_thread_id();
+  for (int try_temp_dir = 1; try_temp_dir >= 0; try_temp_dir--) {
+    const char* dir = (try_temp_dir ? os::get_temp_directory() : NULL);
+    if (dir == NULL) {
+      jio_snprintf(file_name, sizeof(file_name), "objectses_c" UINTX_FORMAT "_pid%u.log",
+      thread_id, os::current_process_id());
+    }
+    else {
+      jio_snprintf(file_name, sizeof(file_name),
+        "%s%sobjectses_c" UINTX_FORMAT "_pid%u.log", dir,
+        os::file_separator(), thread_id, os::current_process_id());
+    }
+
+    fp = os::fopen(file_name, "wt");
+    if (fp != NULL) {
+      fileStream* log = new (mtCompiler) fileStream(fp, true);
+      if (log == NULL) {
+        fclose(fp);
+        return;
+      }
+      thread->init_ObjectsESLog(log);
+      return;
+    }
+  }
+  warning("Cannot open log file: %s", file_name);
 }
 
 void CompileBroker::log_metaspace_failure() {
@@ -2253,6 +2334,10 @@ void CompileBroker::invoke_compiler_on_method(CompileTask* task) {
     }
     if (should_log) {
       ci_env.set_log(thread->log());
+    }
+
+    if (comp->is_c2() && LogObjectsES) {
+      ci_env.set_objectsESLog(thread->objectsESLog());
     }
     assert(thread->env() == &ci_env, "set by ci_env");
     // The thread-env() field is cleared in ~CompileTaskWrapper.

@@ -121,6 +121,9 @@
   notproduct(bool, VerifyIdealNodeCount, false,                             \
           "Verify that tracked dead ideal node count is accurate")          \
                                                                             \
+   product(bool, LogObjectsES, false,                                       \
+          "Log information about objects escape status")                    \
+                                                                            \
   notproduct(bool, PrintIdealNodeCount, false,                              \
           "Print liveness counts of ideal nodes")                           \
                                                                             \

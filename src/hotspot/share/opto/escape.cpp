@@ -126,6 +126,27 @@ void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn) {
   }
 }
 
+void ConnectionGraph::dump_object_escape_status(GrowableArray<JavaObjectNode*> objects) {
+  fileStream* log = _compile->objectsESLog();
+  int objects_by_escape_state[] = {0, 0, 0, 0, 0};
+
+  for (int next = 0; next < objects.length(); ++next) {
+    PointsToNode* ptn = objects.at(next);
+    if (ptn->ideal_node()->is_Allocate()) {
+      objects_by_escape_state[PointsToNode::EscapeState::UnknownEscape] += 1;
+      objects_by_escape_state[ptn->escape_state()] += 1;
+    }
+  }
+
+  log->print("%s::%s ", _compile->method()->name()->as_utf8(), _compile->method()->holder()->name()->as_utf8());
+  log->print("invocation=%d ", _invocation);
+  log->print("objects=%d ", objects_by_escape_state[PointsToNode::EscapeState::UnknownEscape]); // Sum of all the below
+  log->print("no_escape=%d ", objects_by_escape_state[PointsToNode::EscapeState::NoEscape]);
+  log->print("arg_escape=%d ", objects_by_escape_state[PointsToNode::EscapeState::ArgEscape]);
+  log->print("glob_escape=%d ", objects_by_escape_state[PointsToNode::EscapeState::GlobalEscape]);
+  log->cr();
+}
+
 bool ConnectionGraph::compute_escape() {
   Compile* C = _compile;
   PhaseGVN* igvn = _igvn;
@@ -353,6 +374,8 @@ bool ConnectionGraph::compute_escape() {
   if (has_non_escaping_obj) {
     optimize_ideal_graph(ptr_cmp_worklist, storestore_worklist);
   }
+
+  dump_object_escape_status(java_objects_worklist);
 
 #ifndef PRODUCT
   if (PrintEscapeAnalysis) {

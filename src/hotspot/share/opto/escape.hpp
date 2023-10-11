@@ -584,6 +584,8 @@ private:
   // Notify optimizer that a node has been modified
   void record_for_optimizer(Node *n);
 
+  void dump_object_escape_status(GrowableArray<JavaObjectNode*> objects);
+
   // Compute the escape information
   bool compute_escape();
 
