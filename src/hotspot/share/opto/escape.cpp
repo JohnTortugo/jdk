@@ -145,6 +145,23 @@ void ConnectionGraph::dump_object_escape_status(GrowableArray<JavaObjectNode*> o
   log->print("arg_escape=%d ", objects_by_escape_state[PointsToNode::EscapeState::ArgEscape]);
   log->print("glob_escape=%d ", objects_by_escape_state[PointsToNode::EscapeState::GlobalEscape]);
   log->cr();
+
+  for (int next = 0; next < objects.length(); ++next) {
+    PointsToNode* ptn = objects.at(next);
+    if (ptn->ideal_node()->is_Allocate()) {
+      AllocateNode* alloc = ptn->ideal_node()->as_Allocate();
+      Node* klass = alloc->in(AllocateNode::KlassNode);
+      const TypeKlassPtr* tklass = _igvn->type(klass)->is_klassptr();
+      if (tklass->klass_is_exact()) {
+        log->print("  Name [%s]: ", ptn->escape_status_names[ptn->escape_state()]);
+        tklass->exact_klass()->print_name_on(log);
+      } else {
+        log->print("  Name [%s]: ", ptn->escape_status_names[ptn->escape_state()]);
+        tklass->dump_on(log);
+      }
+      log->cr();
+    }
+  }
 }
 
 bool ConnectionGraph::compute_escape() {
@@ -375,7 +392,9 @@ bool ConnectionGraph::compute_escape() {
     optimize_ideal_graph(ptr_cmp_worklist, storestore_worklist);
   }
 
-  dump_object_escape_status(java_objects_worklist);
+  if (LogObjectsES) {
+    dump_object_escape_status(java_objects_worklist);
+  }
 
 #ifndef PRODUCT
   if (PrintEscapeAnalysis) {
@@ -4227,8 +4246,12 @@ void PointsToNode::dump_header(bool print_state, outputStream* out) const {
     EscapeState es = escape_state();
     EscapeState fields_es = fields_escape_state();
     out->print("%s(%s) ", esc_names[(int)es], esc_names[(int)fields_es]);
-    if (nt == PointsToNode::JavaObject && !this->scalar_replaceable()) {
-      out->print("NSR ");
+    if (nt == PointsToNode::JavaObject) {
+      if (!this->scalar_replaceable()) {
+        out->print("NSR ");
+      } else {
+        out->print("SR ");
+      }
     }
   }
 }
@@ -4243,19 +4266,20 @@ void PointsToNode::dump(bool print_state, outputStream* out, bool newline) const
     if (f->offset() > 0) {
       out->print("+%d ", f->offset());
     }
-    out->print("(");
+    out->print("bases: (");
     for (BaseIterator i(f); i.has_next(); i.next()) {
       PointsToNode* b = i.get();
-      out->print(" %d%s", b->idx(),(b->is_JavaObject() ? "P" : ""));
+      out->print(" %d%s", b->pidx(),(b->is_JavaObject() ? "P" : ""));
     }
-    out->print(" )");
+    out->print(") ");
   }
-  out->print("[");
+  out->print("edges: [");
   for (EdgeIterator i(this); i.has_next(); i.next()) {
     PointsToNode* e = i.get();
-    out->print(" %d%s%s", e->idx(),(e->is_JavaObject() ? "P" : (e->is_Field() ? "F" : "")), e->is_Arraycopy() ? "cp" : "");
+    out->print(" %d%s%s", e->pidx(),(e->is_JavaObject() ? "P" : (e->is_Field() ? "F" : "")), e->is_Arraycopy() ? "cp" : "");
   }
-  out->print(" [");
+  out->print("] ");
+  out->print("uses: [");
   for (UseIterator i(this); i.has_next(); i.next()) {
     PointsToNode* u = i.get();
     bool is_base = false;
@@ -4263,53 +4287,25 @@ void PointsToNode::dump(bool print_state, outputStream* out, bool newline) const
       is_base = true;
       u = PointsToNode::get_use_node(u)->as_Field();
     }
-    out->print(" %d%s%s", u->idx(), is_base ? "b" : "", u->is_Arraycopy() ? "cp" : "");
+    out->print(" %d%s%s", u->pidx(), is_base ? "b" : "", u->is_Arraycopy() ? "cp" : "");
   }
-  out->print(" ]]  ");
+  out->print("] ");
+  if (escape_start()) {
+    out->print("escape_start ");
+  }
+  out->print(" src: ");
   if (_node == nullptr) {
-    out->print("<null>%s", newline ? "\n" : "");
+    out->print("0:null%s", newline ? "\n" : "");
   } else {
-    _node->dump(newline ? "\n" : "", false, out);
+    out->print("%d:%s%s", _node->_idx, _node->Name(), newline ? "\n" : "");
   }
 }
 
 void ConnectionGraph::dump(GrowableArray<PointsToNode*>& ptnodes_worklist) {
-  bool first = true;
-  int ptnodes_length = ptnodes_worklist.length();
-  for (int i = 0; i < ptnodes_length; i++) {
+  for (int i = 0; i < ptnodes_worklist.length(); i++) {
     PointsToNode *ptn = ptnodes_worklist.at(i);
-    if (ptn == nullptr || !ptn->is_JavaObject()) {
-      continue;
-    }
-    PointsToNode::EscapeState es = ptn->escape_state();
-    if ((es != PointsToNode::NoEscape) && !Verbose) {
-      continue;
-    }
-    Node* n = ptn->ideal_node();
-    if (n->is_Allocate() || (n->is_CallStaticJava() &&
-                             n->as_CallStaticJava()->is_boxing_method())) {
-      if (first) {
-        tty->cr();
-        tty->print("======== Connection graph for ");
-        _compile->method()->print_short_name();
-        tty->cr();
-        tty->print_cr("invocation #%d: %d iterations and %f sec to build connection graph with %d nodes and worklist size %d",
-                      _invocation, _build_iterations, _build_time, nodes_size(), ptnodes_worklist.length());
-        tty->cr();
-        first = false;
-      }
-      ptn->dump();
-      // Print all locals and fields which reference this allocation
-      for (UseIterator j(ptn); j.has_next(); j.next()) {
-        PointsToNode* use = j.get();
-        if (use->is_LocalVar()) {
-          use->dump(Verbose);
-        } else if (Verbose) {
-          use->dump();
-        }
-      }
-      tty->cr();
-    }
+    if (ptn == nullptr) continue;
+    ptn->dump();
   }
 }
 

@@ -136,6 +136,8 @@ class PointsToNode : public ArenaObj {
   u1                _flags;  // NodeFlags
   u1               _escape;  // EscapeState of object
   u1        _fields_escape;  // EscapeState of object's fields
+  bool       _escape_start;  // True if this node was already escaping when
+                             // it was added to the graph.
 
   Node* const        _node;  // Ideal node corresponding to this PointsTo node.
   const int           _idx;  // Cached ideal node's _idx
@@ -167,10 +169,14 @@ public:
     ArraycopyDst      = 8   // Has edge to Arraycopy node
   } NodeFlags;
 
+  const char* escape_status_names[4] = {
+    "Uknown", "NoEscape", "ArgEscape", "GlobalEscape"
+  };
 
   inline PointsToNode(ConnectionGraph* CG, Node* n, EscapeState es, NodeType type);
 
-  uint        pidx()   const { return _pidx; }
+  uint         pidx()   const { return _pidx; }
+  bool escape_start()   const { return _escape_start; }
 
   Node* ideal_node()   const { return _node; }
   int          idx()   const { return _idx; }
@@ -184,6 +190,8 @@ public:
   LocalVarNode*   as_LocalVar()   { assert(is_LocalVar(),"");   return (LocalVarNode*)this; }
   FieldNode*      as_Field()      { assert(is_Field(),"");      return (FieldNode*)this; }
   ArraycopyNode*  as_Arraycopy()  { assert(is_Arraycopy(),"");  return (ArraycopyNode*)this; }
+
+  void set_escape_start()         { _escape_start = true; }
 
   EscapeState escape_state() const { return (EscapeState)_escape; }
   void    set_escape_state(EscapeState state) { _escape = (u1)state; }
@@ -680,6 +688,7 @@ inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, 
   _flags(ScalarReplaceable),
   _escape((u1)es),
   _fields_escape((u1)es),
+  _escape_start(es != NoEscape),
   _node(n),
   _idx(n->_idx),
   _pidx(CG->next_pidx()) {
