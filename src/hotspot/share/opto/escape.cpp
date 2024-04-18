@@ -45,6 +45,27 @@
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
+static void save_graph(Compile* comp, Node* phi) {
+  static int counter = 1;
+
+  stringStream ss;
+  ss.print("/tmp/graph__%d.ir", counter);
+  Unique_Node_List ideal_nodes;
+  fileStream fstream(ss.as_string());
+
+  if (phi == nullptr)
+    comp->root()->dump_bfs(1000, nullptr, "-", &fstream);
+  else
+    phi->dump_bfs(1000, nullptr, "-", &fstream);
+
+  fstream.flush();
+
+  tty->print_cr("----------------------------------------");
+  tty->print_cr("Graph dumped to: %s", ss.as_string());
+
+  Atomic::inc(&counter);
+}
+
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
   // If ReduceAllocationMerges is enabled we might call split_through_phi during
   // split_unique_types and that will create additional nodes that need to be
@@ -141,6 +162,7 @@ bool ConnectionGraph::compute_escape() {
   GrowableArray<MemBarStoreStoreNode*> storestore_worklist;
   GrowableArray<ArrayCopyNode*>  arraycopy_worklist;
   GrowableArray<PointsToNode*>   ptnodes_worklist;
+  GrowableArray<JavaObjectNode*> unique_types;
   GrowableArray<JavaObjectNode*> java_objects_worklist;
   GrowableArray<JavaObjectNode*> non_escaped_allocs_worklist;
   GrowableArray<FieldNode*>      oop_fields_worklist;
@@ -290,65 +312,73 @@ bool ConnectionGraph::compute_escape() {
     return false;
   }
 
-  // 3. Adjust scalar_replaceable state of nonescaping objects and push
-  //    scalar replaceable allocations on alloc_worklist for processing
-  //    in split_unique_types().
-  GrowableArray<JavaObjectNode*> jobj_worklist;
-  int non_escaped_length = non_escaped_allocs_worklist.length();
-  bool found_nsr_alloc = false;
-  for (int next = 0; next < non_escaped_length; next++) {
-    JavaObjectNode* ptn = non_escaped_allocs_worklist.at(next);
-    bool noescape = (ptn->escape_state() == PointsToNode::NoEscape);
-    Node* n = ptn->ideal_node();
-    if (n->is_Allocate()) {
-      n->as_Allocate()->_is_non_escaping = noescape;
+  // Initially assume all java_objects are unique types
+  unique_types.appendAll(&java_objects_worklist);
+
+  bool recheck_unique_types = true;
+  while (recheck_unique_types) {
+    recheck_unique_types = false;
+
+    for (int next = 0; next < unique_types.length(); next++) {
+      JavaObjectNode* ptn = unique_types.at(next);
+
+      if (ptn->unique_type()) {
+        adjust_unique_type_state(ptn, reducible_merges);
+
+        if (ptn->unique_type()) {
+          continue;
+        }
+      }
+
+      recheck_unique_types = true;
+      unique_types.remove_at(next);
+      break;
     }
-    if (noescape && ptn->scalar_replaceable()) {
-      adjust_scalar_replaceable_state(ptn, reducible_merges);
-      if (ptn->scalar_replaceable()) {
-        jobj_worklist.push(ptn);
-      } else {
-        found_nsr_alloc = true;
+
+    // If we don't need to recheck unique types,
+    // we can move to check scalar replaceable state.
+    if (!recheck_unique_types) {
+      GrowableArray<JavaObjectNode*> scalar_replaceable(unique_types);
+      bool recheck_scalar_replaceable = true;
+      while (recheck_scalar_replaceable) {
+        recheck_scalar_replaceable = false;
+
+        for (int next = 0; next < scalar_replaceable.length(); next++) {
+          JavaObjectNode* ptn = scalar_replaceable.at(next);
+
+          if (ptn->scalar_replaceable()) {
+            adjust_scalar_replaceable_state(ptn);
+
+            if (ptn->scalar_replaceable()) {
+              continue;
+            }
+          }
+
+          recheck_scalar_replaceable = true;
+          scalar_replaceable.remove_at(next);
+          find_scalar_replaceable_allocs(scalar_replaceable);
+          break;
+        }
       }
     }
-  }
-
-  // Propagate NSR (Not Scalar Replaceable) state.
-  if (found_nsr_alloc) {
-    find_scalar_replaceable_allocs(jobj_worklist);
   }
 
   // alloc_worklist will be processed in reverse push order.
   // Therefore the reducible Phis will be processed for last and that's what we
   // want because by then the scalarizable inputs of the merge will already have
   // an unique instance type.
-  for (uint i = 0; i < reducible_merges.size(); i++ ) {
-    Node* n = reducible_merges.at(i);
-    alloc_worklist.append(n);
+  for (uint i = 0; i < reducible_merges.size(); i++) {
+    Node* phi = reducible_merges.at(i);
+    alloc_worklist.append(phi);
   }
-
-  for (int next = 0; next < jobj_worklist.length(); ++next) {
-    JavaObjectNode* jobj = jobj_worklist.at(next);
-    if (jobj->scalar_replaceable()) {
-      alloc_worklist.append(jobj->ideal_node());
+  for (int next = 0; next < unique_types.length(); next++) {
+    JavaObjectNode* ptr = unique_types.at(next);
+    if (ptr != phantom_obj) {
+      alloc_worklist.append(ptr->ideal_node());
     }
   }
 
-#ifdef ASSERT
-  if (VerifyConnectionGraph) {
-    // Verify that graph is complete - no new edges could be added or needed.
-    verify_connection_graph(ptnodes_worklist, non_escaped_allocs_worklist,
-                            java_objects_worklist, addp_worklist);
-  }
-  assert(C->unique() == nodes_size(), "no new ideal nodes should be added during ConnectionGraph build");
-  assert(null_obj->escape_state() == PointsToNode::NoEscape &&
-         null_obj->edge_count() == 0 &&
-         !null_obj->arraycopy_src() &&
-         !null_obj->arraycopy_dst(), "sanity");
-#endif
-
   _collecting = false;
-
   } // TracePhase t3("connectionGraph")
 
   // 4. Optimize ideal graph based on EA information.
@@ -357,38 +387,8 @@ bool ConnectionGraph::compute_escape() {
     optimize_ideal_graph(ptr_cmp_worklist, storestore_worklist);
   }
 
-#ifndef PRODUCT
-  if (PrintEscapeAnalysis) {
-    dump(ptnodes_worklist); // Dump ConnectionGraph
-  }
-#endif
-
-#ifdef ASSERT
-  if (VerifyConnectionGraph) {
-    int alloc_length = alloc_worklist.length();
-    for (int next = 0; next < alloc_length; ++next) {
-      Node* n = alloc_worklist.at(next);
-      PointsToNode* ptn = ptnode_adr(n->_idx);
-      assert(ptn->escape_state() == PointsToNode::NoEscape && ptn->scalar_replaceable(), "sanity");
-    }
-  }
-
-  if (VerifyReduceAllocationMerges) {
-    for (uint i = 0; i < reducible_merges.size(); i++ ) {
-      Node* n = reducible_merges.at(i);
-      if (!can_reduce_phi(n->as_Phi())) {
-        TraceReduceAllocationMerges = true;
-        n->dump(2);
-        n->dump(-2);
-        assert(can_reduce_phi(n->as_Phi()), "Sanity: previous reducible Phi is no longer reducible before SUT.");
-      }
-    }
-  }
-#endif
-
-  // 5. Separate memory graph for scalar replaceable allcations.
-  bool has_scalar_replaceable_candidates = (alloc_worklist.length() > 0);
-  if (has_scalar_replaceable_candidates && EliminateAllocations) {
+  // 5. Separate memory graph for scalar replaceable allocations.
+  if (alloc_worklist.length() > 0 && EliminateAllocations) {
     assert(C->do_aliasing(), "Aliasing should be enabled");
     // Now use the escape information to create unique types for
     // scalar replaceable objects.
@@ -398,18 +398,6 @@ bool ConnectionGraph::compute_escape() {
       return false;
     }
     C->print_method(PHASE_AFTER_EA, 2);
-
-#ifdef ASSERT
-  } else if (Verbose && (PrintEscapeAnalysis || PrintEliminateAllocations)) {
-    tty->print("=== No allocations eliminated for ");
-    C->method()->print_short_name();
-    if (!EliminateAllocations) {
-      tty->print(" since EliminateAllocations is off ===");
-    } else if(!has_scalar_replaceable_candidates) {
-      tty->print(" since there are no scalar replaceable candidates ===");
-    }
-    tty->cr();
-#endif
   }
 
   // 6. Reduce allocation merges used as debug information. This is done after
@@ -2841,8 +2829,8 @@ int ConnectionGraph::find_init_values_null(JavaObjectNode* pta, PhaseValues* pha
   return new_edges;
 }
 
-// Adjust scalar_replaceable state after Connection Graph is built.
-void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Unique_Node_List &reducible_merges) {
+// Adjust unique state after Connection Graph is built.
+void ConnectionGraph::adjust_unique_type_state(JavaObjectNode* jobj, Unique_Node_List &reducible_merges) {
   // A Phi 'x' is a _candidate_ to be reducible if 'can_reduce_phi(x)'
   // returns true. If one of the constraints in this method set 'jobj' to NSR
   // then the candidate Phi is discarded. If the Phi has another SR 'jobj' as
@@ -2851,8 +2839,133 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
   // There could be multiple merges involving the same jobj.
   Unique_Node_List candidates;
 
-  // Search for non-escaping objects which are not scalar replaceable
-  // and mark them to propagate the state to referenced objects.
+  // jobj is already flagged as not unique.
+  if (jobj->unique_type() == false) {
+    return;
+  }
+
+  const Type* t = _igvn->type(jobj->ideal_node());
+  if (t == TypePtr::NULL_PTR || t == TypeNarrowOop::NULL_PTR) {
+    set_not_unique_type(jobj NOT_PRODUCT(COMMA "NULL obj."));
+    return;
+  }
+
+  // jobj is not unique if it globally escapes.
+  if (jobj->escape_state() > PointsToNode::ArgEscape) {
+    set_not_unique_type(jobj NOT_PRODUCT(COMMA "Object globally escapes."));
+    return;
+  }
+
+  for (UseIterator i(jobj); i.has_next(); i.next()) {
+    PointsToNode* use = i.get();
+    if (use->is_Arraycopy()) {
+      continue;
+    }
+    assert(use->is_Field() || use->is_LocalVar(), "sanity");
+
+    // An object is not scalar replaceable if it is merged with other objects
+    // and we can't remove the merge.
+    for (EdgeIterator j(use); j.has_next(); j.next()) {
+      PointsToNode* ptn = j.get();
+      if (ptn->is_JavaObject() && ptn != jobj) {
+        Node* use_n = use->ideal_node();
+
+        // These other local vars may point to multiple objects through a Phi
+        // In this case we skip them and see if we can reduce the Phi.
+        if (use_n->is_CastPP() || use_n->is_CheckCastPP()) {
+          use_n = use_n->in(1);
+        }
+
+        // If it's already a candidate or confirmed reducible merge we can skip verification
+        if (candidates.member(use_n) || reducible_merges.member(use_n)) {
+          continue;
+        }
+
+        if (use_n->is_Phi() && can_reduce_phi(use_n->as_Phi())) {
+          candidates.push(use_n);
+        } else {
+          // Mark all objects as NSR if we can't remove the merge
+          set_not_unique_type(jobj NOT_PRODUCT(COMMA trace_merged_message(ptn)));
+          set_not_unique_type(ptn NOT_PRODUCT(COMMA trace_merged_message(jobj)));
+        }
+      }
+    }
+    if (!jobj->unique_type()) {
+      return;
+    }
+  }
+
+  for (EdgeIterator j(jobj); j.has_next(); j.next()) {
+    if (j.get()->is_Arraycopy()) {
+      continue;
+    }
+
+    // Non-escaping object node should point only to field nodes.
+    FieldNode* field = j.get()->as_Field();
+
+    // 6. Or the address may point to more then one object. This may produce
+    // the false positive result (set not scalar replaceable)
+    // since the flow-insensitive escape analysis can't separate
+    // the case when stores overwrite the field's value from the case
+    // when stores happened on different control branches.
+    //
+    // Note: it will disable scalar replacement in some cases:
+    //
+    //    Point p[] = new Point[1];
+    //    p[0] = new Point(); // Will be not scalar replaced
+    //
+    // but it will save us from incorrect optimizations in next cases:
+    //
+    //    Point p[] = new Point[1];
+    //    if ( x ) p[0] = new Point(); // Will be not scalar replaced
+    //
+    if (field->base_count() > 1 && candidates.size() == 0) {
+      if (has_non_reducible_merge(field, reducible_merges)) {
+        for (BaseIterator i(field); i.has_next(); i.next()) {
+          PointsToNode* base = i.get();
+          // Don't take into account LocalVar nodes which
+          // may point to only one object which should be also
+          // this field's base by now.
+          if (base->is_JavaObject() && base != jobj) {
+            set_not_unique_type(jobj NOT_PRODUCT(COMMA "may point to more than one object"));
+            set_not_unique_type(base NOT_PRODUCT(COMMA "may point to more than one object"));
+          }
+        }
+
+        if (!jobj->unique_type()) {
+          return;
+        }
+      }
+    }
+  }
+
+  // The candidate is truly a reducible merge only if none of the other
+  // constraints ruled it as NSR. There could be multiple merges involving the
+  // same jobj.
+  assert(jobj->unique_type(), "sanity");
+  for (uint i = 0; i < candidates.size(); i++ ) {
+    Node* candidate = candidates.at(i);
+    reducible_merges.push(candidate);
+  }
+}
+
+// Adjust scalar_replaceable state after Connection Graph is built.
+void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj) {
+  // jobj is not scalar replaceable if it's not an Allocate or if the object escapes.
+  if (!jobj->ideal_node()->is_Allocate()) {
+    set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "Not an object allocation."));
+    return;
+  }
+
+  if (jobj->escape_state() != PointsToNode::NoEscape) {
+    set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "Object escapes."));
+    return;
+  }
+
+  if (!jobj->unique_type()) {
+    set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "Object is not an unique type."));
+    return;
+  }
 
   for (UseIterator i(jobj); i.has_next(); i.next()) {
     PointsToNode* use = i.get();
@@ -2885,33 +2998,6 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
       }
     }
     assert(use->is_Field() || use->is_LocalVar(), "sanity");
-    // 3. An object is not scalar replaceable if it is merged with other objects
-    // and we can't remove the merge
-    for (EdgeIterator j(use); j.has_next(); j.next()) {
-      PointsToNode* ptn = j.get();
-      if (ptn->is_JavaObject() && ptn != jobj) {
-        Node* use_n = use->ideal_node();
-
-        // These other local vars may point to multiple objects through a Phi
-        // In this case we skip them and see if we can reduce the Phi.
-        if (use_n->is_CastPP() || use_n->is_CheckCastPP()) {
-          use_n = use_n->in(1);
-        }
-
-        // If it's already a candidate or confirmed reducible merge we can skip verification
-        if (candidates.member(use_n) || reducible_merges.member(use_n)) {
-          continue;
-        }
-
-        if (use_n->is_Phi() && can_reduce_phi(use_n->as_Phi())) {
-          candidates.push(use_n);
-        } else {
-          // Mark all objects as NSR if we can't remove the merge
-          set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA trace_merged_message(ptn)));
-          set_not_scalar_replaceable(ptn NOT_PRODUCT(COMMA trace_merged_message(jobj)));
-        }
-      }
-    }
     if (!jobj->scalar_replaceable()) {
       return;
     }
@@ -2955,51 +3041,6 @@ void ConnectionGraph::adjust_scalar_replaceable_state(JavaObjectNode* jobj, Uniq
         return;
       }
     }
-
-    // 6. Or the address may point to more then one object. This may produce
-    // the false positive result (set not scalar replaceable)
-    // since the flow-insensitive escape analysis can't separate
-    // the case when stores overwrite the field's value from the case
-    // when stores happened on different control branches.
-    //
-    // Note: it will disable scalar replacement in some cases:
-    //
-    //    Point p[] = new Point[1];
-    //    p[0] = new Point(); // Will be not scalar replaced
-    //
-    // but it will save us from incorrect optimizations in next cases:
-    //
-    //    Point p[] = new Point[1];
-    //    if ( x ) p[0] = new Point(); // Will be not scalar replaced
-    //
-    if (field->base_count() > 1 && candidates.size() == 0) {
-      if (has_non_reducible_merge(field, reducible_merges)) {
-        for (BaseIterator i(field); i.has_next(); i.next()) {
-          PointsToNode* base = i.get();
-          // Don't take into account LocalVar nodes which
-          // may point to only one object which should be also
-          // this field's base by now.
-          if (base->is_JavaObject() && base != jobj) {
-            // Mark all bases.
-            set_not_scalar_replaceable(jobj NOT_PRODUCT(COMMA "may point to more than one object"));
-            set_not_scalar_replaceable(base NOT_PRODUCT(COMMA "may point to more than one object"));
-          }
-        }
-
-        if (!jobj->scalar_replaceable()) {
-          return;
-        }
-      }
-    }
-  }
-
-  // The candidate is truly a reducible merge only if none of the other
-  // constraints ruled it as NSR. There could be multiple merges involving the
-  // same jobj.
-  assert(jobj->scalar_replaceable(), "sanity");
-  for (uint i = 0; i < candidates.size(); i++ ) {
-    Node* candidate = candidates.at(i);
-    reducible_merges.push(candidate);
   }
 }
 
@@ -3657,10 +3698,15 @@ Node* ConnectionGraph::get_addp_base(Node *addp) {
     } else {
       Node* uncast_base = base->uncast();
       int opcode = uncast_base->Opcode();
-      assert(opcode == Op_ConP || opcode == Op_ThreadLocal ||
-             opcode == Op_CastX2P || uncast_base->is_DecodeNarrowPtr() ||
-             (uncast_base->is_Mem() && (uncast_base->bottom_type()->isa_rawptr() != nullptr)) ||
-             is_captured_store_address(addp), "sanity");
+      bool condition = (opcode == Op_ConP || opcode == Op_ThreadLocal ||
+             opcode == Op_CastX2P || opcode == Op_Proj || uncast_base->is_DecodeNarrowPtr() ||
+             (uncast_base->is_Mem() && (uncast_base->bottom_type()->isa_rawptr() != nullptr))
+              );
+
+      if (!condition && _igvn->type(addp)->isa_oopptr() != nullptr) {
+        tty->print_cr("This is the addp: "); addp->dump();
+        save_graph(_compile, nullptr);
+      }
     }
   }
   return base;
@@ -4148,6 +4194,58 @@ Node* ConnectionGraph::find_inst_mem(Node *orig_mem, int alias_idx, GrowableArra
   return result;
 }
 
+//bool ConnectionGraph::maybe_unique_type(AllocateNode* alloc) {
+//  PointsToNode* ptn = ptnode_adr(alloc->_idx);
+//  PointsToNode::EscapeState es = ptn->escape_state();
+//
+//  // see if it is non-escaped and scalar replaceable for now
+//  if (es != PointsToNode::NoEscape || !ptn->scalar_replaceable()) {
+//    return false;
+//  }
+//
+//  Node* ccpp = alloc->result_cast();
+//  if (ccpp == nullptr || !ccpp->is_CheckCastPP()) {
+//    // unused allocate or not unique CheckCastPP.
+//    // we could reach here for allocate case if one init is associated with many allocs.
+//    if (alloc->is_Allocate()) {
+//      alloc->as_Allocate()->_is_scalar_replaceable = false;
+//    }
+//    return false;
+//  }
+//
+//  const TypeOopPtr *t = _igvn->type(ccpp)->isa_oopptr();
+//  if (t == nullptr || !t->klass_is_exact()) {
+//    return false;
+//  }
+//
+//  // Detect j.l.reflect.Array.newInstance(jobject, jint) case when
+//  // the allocation result is cast to java.lang.Object and then
+//  // to the actual Array type.
+//  if (alloc->is_Allocate() && ccpp->as_Type()->type() == TypeInstPtr::NOTNULL
+//      && (alloc->is_AllocateArray() ||
+//          _igvn->type(alloc->in(AllocateNode::KlassNode)) != TypeInstKlassPtr::OBJECT)) {
+//    Node *cast2 = nullptr;
+//    for (DUIterator_Fast imax, i = ccpp->fast_outs(imax); i < imax; i++) {
+//      Node *use = ccpp->fast_out(i);
+//      if (use->is_CheckCastPP()) {
+//        cast2 = use;
+//        break;
+//      }
+//    }
+//    if (cast2 == nullptr) {
+//      // Non-scalar replaceable if the allocation type is unknown statically
+//      // (reflection allocation), the object can't be restored during
+//      // deoptimization without precise type.
+//      return false;
+//    }
+//  }
+//
+//  alloc->as_Allocate()->_is_scalar_replaceable = true;
+//  set_escape_state(ptnode_adr(ccpp->_idx), es NOT_PRODUCT(COMMA trace_propagate_message(ptn))); // CheckCastPP escape state
+//
+//  return true;
+//}
+
 //
 //  Convert the types of non-escaped object to instance types where possible,
 //  propagate the new type information through the graph, and update memory
@@ -4259,32 +4357,12 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
   //
   while (alloc_worklist.length() != 0) {
     Node *n = alloc_worklist.pop();
-    uint ni = n->_idx;
-    if (n->is_Call()) {
-      CallNode *alloc = n->as_Call();
-      // copy escape information to call node
-      PointsToNode* ptn = ptnode_adr(alloc->_idx);
-      PointsToNode::EscapeState es = ptn->escape_state();
-      // We have an allocation or call which returns a Java object,
-      // see if it is non-escaped.
-      if (es != PointsToNode::NoEscape || !ptn->scalar_replaceable()) {
-        continue;
-      }
-      // Find CheckCastPP for the allocate or for the return value of a call
-      n = alloc->result_cast();
-      if (n == nullptr) {            // No uses except Initialize node
-        if (alloc->is_Allocate()) {
-          // Set the scalar_replaceable flag for allocation
-          // so it could be eliminated if it has no uses.
-          alloc->as_Allocate()->_is_scalar_replaceable = true;
-        }
-        continue;
-      }
-      if (!n->is_CheckCastPP()) { // not unique CheckCastPP.
-        // we could reach here for allocate case if one init is associated with many allocs.
-        if (alloc->is_Allocate()) {
-          alloc->as_Allocate()->_is_scalar_replaceable = false;
-        }
+
+    if (n->is_Allocate()) {
+      AllocateNode *alloc = n->as_Allocate();
+      Node* ccpp = alloc->result_cast();
+
+      if (ccpp == nullptr) {
         continue;
       }
 
@@ -4294,59 +4372,38 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
       // Also detect j.l.reflect.Array.newInstance(jobject, jint) case when
       // the allocation result is cast to java.lang.Object and then
       // to the actual Array type.
-      if (alloc->is_Allocate() && n->as_Type()->type() == TypeInstPtr::NOTNULL
+      if (ccpp->as_Type()->type() == TypeInstPtr::NOTNULL
           && (alloc->is_AllocateArray() ||
               igvn->type(alloc->in(AllocateNode::KlassNode)) != TypeInstKlassPtr::OBJECT)) {
-        Node *cast2 = nullptr;
-        for (DUIterator_Fast imax, i = n->fast_outs(imax); i < imax; i++) {
-          Node *use = n->fast_out(i);
+        for (DUIterator_Fast imax, i = ccpp->fast_outs(imax); i < imax; i++) {
+          Node *use = ccpp->fast_out(i);
           if (use->is_CheckCastPP()) {
-            cast2 = use;
+            ccpp = use;
             break;
           }
         }
-        if (cast2 != nullptr) {
-          n = cast2;
-        } else {
-          // Non-scalar replaceable if the allocation type is unknown statically
-          // (reflection allocation), the object can't be restored during
-          // deoptimization without precise type.
-          continue;
-        }
+        assert(ccpp != nullptr, "Should be since we validated entries in alloc_worklist");
       }
 
-      const TypeOopPtr *t = igvn->type(n)->isa_oopptr();
-      if (t == nullptr) {
-        continue;  // not a TypeOopPtr
-      }
-      if (!t->klass_is_exact()) {
-        continue; // not an unique type
-      }
-      if (alloc->is_Allocate()) {
-        // Set the scalar_replaceable flag for allocation
-        // so it could be eliminated.
-        alloc->as_Allocate()->_is_scalar_replaceable = true;
-      }
-      set_escape_state(ptnode_adr(n->_idx), es NOT_PRODUCT(COMMA trace_propagate_message(ptn))); // CheckCastPP escape state
-      // in order for an object to be scalar-replaceable, it must be:
-      //   - a direct allocation (not a call returning an object)
-      //   - non-escaping
-      //   - eligible to be a unique type
-      //   - not determined to be ineligible by escape analysis
-      set_map(alloc, n);
-      set_map(n, alloc);
-      const TypeOopPtr* tinst = t->cast_to_instance_id(ni);
-      igvn->hash_delete(n);
-      igvn->set_type(n,  tinst);
-      n->raise_bottom_type(tinst);
-      igvn->hash_insert(n);
-      record_for_optimizer(n);
+      set_map(alloc, ccpp);
+      set_map(ccpp, alloc);
+
+      const TypeOopPtr *t = igvn->type(ccpp)->isa_oopptr();
+      const TypeOopPtr* tinst = t->cast_to_instance_id(alloc->_idx);
+      igvn->hash_delete(ccpp);
+      igvn->set_type(ccpp,  tinst);
+      ccpp->raise_bottom_type(tinst);
+      igvn->hash_insert(ccpp);
+      record_for_optimizer(ccpp);
+
       // Allocate an alias index for the header fields. Accesses to
       // the header emitted during macro expansion wouldn't have
       // correct memory state otherwise.
       _compile->get_alias_index(tinst->add_offset(oopDesc::mark_offset_in_bytes()));
       _compile->get_alias_index(tinst->add_offset(oopDesc::klass_offset_in_bytes()));
-      if (alloc->is_Allocate() && (t->isa_instptr() || t->isa_aryptr())) {
+
+      if (t->isa_instptr() || t->isa_aryptr()) {
+        PointsToNode* ptn = ptnode_adr(alloc->_idx);
 
         // First, put on the worklist all Field edges from Connection Graph
         // which is more accurate than putting immediate users from Ideal Graph.
@@ -4387,6 +4444,57 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
           }
         }
       }
+
+      // Important because we'll push ccpp' users on alloc_worklist
+      // at the bottom of the outer loop.
+      n = ccpp;
+    } else if (n->is_Call()) {
+      CallNode *call = n->as_Call();
+      PointsToNode* ptn = ptnode_adr(call->_idx);
+      PointsToNode::EscapeState es = ptn->escape_state();
+
+      // Find CheckCastPP for the return value of a call
+      Node* ccpp = call->result_cast();
+
+      if (ccpp == nullptr) {
+        continue;
+      }
+
+      set_escape_state(ptnode_adr(ccpp->_idx), es NOT_PRODUCT(COMMA trace_propagate_message(ptn))); // CheckCastPP escape state
+
+      set_map(call, ccpp);
+      set_map(ccpp, call);
+
+      const TypeOopPtr *t = igvn->type(ccpp)->isa_oopptr();
+      const TypeOopPtr* tinst = t->cast_to_instance_id(call->_idx);
+      igvn->hash_delete(ccpp);
+      igvn->set_type(ccpp,  tinst);
+      ccpp->raise_bottom_type(tinst);
+      igvn->hash_insert(ccpp);
+      record_for_optimizer(ccpp);
+
+      // Important because we'll push ccpp' users on alloc_worklist
+      // at the bottom of the outer loop.
+      n = ccpp;
+    } else if (n->is_Con() || n->Opcode() == Op_ThreadLocal) {
+      PointsToNode* ptn = ptnode_adr(n->_idx);
+      PointsToNode::EscapeState es = ptn->escape_state();
+
+      if (es > PointsToNode::ArgEscape ||
+          igvn->type(n)->isa_oopptr() == nullptr) {
+        tty->print_cr("Escape or NotOopPtr: %d | ", es); n->dump();
+        continue;
+      }
+
+      set_map(n, n);
+
+      const TypeOopPtr *t = igvn->type(n)->is_oopptr();
+      const TypeOopPtr* tinst = t->cast_to_instance_id(n->_idx);
+      igvn->hash_delete(n);
+      igvn->set_type(n,  tinst);
+      n->raise_bottom_type(tinst);
+      igvn->hash_insert(n);
+      record_for_optimizer(n);
     } else if (n->is_AddP()) {
       if (has_reducible_merge_base(n->as_AddP(), reducible_merges)) {
         // This AddP will go away when we reduce the the Phi
@@ -4411,7 +4519,8 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
                n->is_DecodeN() ||
                (n->is_ConstraintCast() && n->Opcode() == Op_CastPP)) {
       if (visited.test_set(n->_idx)) {
-        assert(n->is_Phi(), "loops only through Phi's");
+        n->dump();
+        tty->print_cr("loops only through Phi's");
         continue;  // already processed
       }
       // Reducible Phi's will be removed from the graph after split_unique_types
@@ -4472,6 +4581,7 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
       }
     } else {
       debug_only(n->dump();)
+      save_graph(_compile, nullptr);
       assert(false, "EA: unexpected node");
       continue;
     }
@@ -4529,8 +4639,13 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
               op == Op_StrIndexOf || op == Op_StrIndexOfChar ||
               op == Op_SubTypeCheck ||
               BarrierSet::barrier_set()->barrier_set_c2()->is_gc_barrier_node(use))) {
+
+          PointsToNode* ptn = ptnode_adr(n->_idx);
+          PointsToNode::EscapeState es = ptn->escape_state();
+          tty->print_cr("EscapeState = %d", es);
           n->dump();
           use->dump();
+
           assert(false, "EA: missing allocation reference path");
         }
 #endif
@@ -4544,7 +4659,7 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
     for (uint i = 0; i < reducible_merges.size(); i++) {
       Node* phi = reducible_merges.at(i);
 
-      if (!reduced_merges.member(phi)) {
+      if (!reduced_merges.member(phi) && phi->outcnt() > 0) {
         phi->dump(2);
         phi->dump(-2);
         assert(false, "This reducible merge wasn't reduced.");
@@ -4798,21 +4913,11 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
   // in Phase 2 and move stores memory users to corresponding memory slices.
   // Disable memory split verification code until the fix for 6984348.
   // Currently it produces false negative results since it does not cover all cases.
-#if 0 // ifdef ASSERT
-  visited.Reset();
-  Node_Stack old_mems(arena, _compile->unique() >> 2);
-#endif
   for (uint i = 0; i < ideal_nodes.size(); i++) {
     Node*    n = ideal_nodes.at(i);
     Node* nmem = get_map(n->_idx);
     assert(nmem != nullptr, "sanity");
     if (n->is_Mem()) {
-#if 0 // ifdef ASSERT
-      Node* old_mem = n->in(MemNode::Memory);
-      if (!visited.test_set(old_mem->_idx)) {
-        old_mems.push(old_mem, old_mem->outcnt());
-      }
-#endif
       assert(n->in(MemNode::Memory) != nmem, "sanity");
       if (!n->is_Load()) {
         // Move memory users of a store first.
@@ -4828,15 +4933,6 @@ void ConnectionGraph::split_unique_types(GrowableArray<Node *>  &alloc_worklist,
              n->is_AddP() || n->is_Phi(), "unknown node used for set_map()");
     }
   }
-#if 0 // ifdef ASSERT
-  // Verify that memory was split correctly
-  while (old_mems.is_nonempty()) {
-    Node* old_mem = old_mems.node();
-    uint  old_cnt = old_mems.index();
-    old_mems.pop();
-    assert(old_cnt == old_mem->outcnt(), "old mem could be lost");
-  }
-#endif
 }
 
 #ifndef PRODUCT

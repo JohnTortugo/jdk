@@ -162,10 +162,11 @@ public:
   } EscapeState;
 
   typedef enum {
-    ScalarReplaceable = 1,  // Not escaped object could be replaced with scalar
-    PointsToUnknown   = 2,  // Has edge to phantom_object
-    ArraycopySrc      = 4,  // Has edge from Arraycopy node
-    ArraycopyDst      = 8   // Has edge to Arraycopy node
+    ScalarReplaceable =  1,  // Not escaped object could be replaced with scalar
+    PointsToUnknown   =  2,  // Has edge to phantom_object
+    ArraycopySrc      =  4,  // Has edge from Arraycopy node
+    ArraycopyDst      =  8,  // Has edge to Arraycopy node
+    UniqueType        = 16   // Has unique type
   } NodeFlags;
 
 
@@ -204,8 +205,21 @@ public:
   void set_scalar_replaceable(bool set) {
     if (set) {
       _flags |= ScalarReplaceable;
+      assert(unique_type(), "A node can be scalar replaceable only if it has unique type.");
     } else {
       _flags &= ~ScalarReplaceable;
+    }
+  }
+
+  bool     unique_type() const { return (_flags & UniqueType) != 0;}
+  void set_unique_type(bool set) {
+    // To be safe, always reset ScalarReplaceable flag when unique type status change.
+    _flags &= ~ScalarReplaceable;
+
+    if (set) {
+      _flags |= UniqueType;
+    } else {
+      _flags &= ~UniqueType;
     }
   }
 
@@ -470,7 +484,8 @@ private:
                                 GrowableArray<JavaObjectNode*>& non_escaped_worklist);
 
   // Adjust scalar_replaceable state after Connection Graph is built.
-  void adjust_scalar_replaceable_state(JavaObjectNode* jobj, Unique_Node_List &reducible_merges);
+  void adjust_unique_type_state(JavaObjectNode* jobj, Unique_Node_List &reducible_merges);
+  void adjust_scalar_replaceable_state(JavaObjectNode* jobj);
 
   // Propagate NSR (Not scalar replaceable) state.
   void find_scalar_replaceable_allocs(GrowableArray<JavaObjectNode*>& jobj_worklist);
@@ -623,6 +638,18 @@ private:
     ptn->set_scalar_replaceable(false);
   }
 
+  void set_not_unique_type(PointsToNode* ptn NOT_PRODUCT(COMMA const char* reason)) const {
+#ifndef PRODUCT
+    if (_compile->directive()->TraceEscapeAnalysisOption) {
+      assert(ptn != nullptr, "should not be null");
+      ptn->dump_header(true);
+      tty->print_cr("is not unique type. %s", reason);
+    }
+#endif
+    ptn->set_unique_type(false);
+  }
+
+
 #ifndef PRODUCT
   void trace_es_update_helper(PointsToNode* ptn, PointsToNode::EscapeState es, bool fields, const char* reason) const;
   const char* trace_propagate_message(PointsToNode* from) const;
@@ -691,7 +718,9 @@ inline PointsToNode::PointsToNode(ConnectionGraph *CG, Node* n, EscapeState es, 
   _edges(CG->_compile->comp_arena(), 2, 0, nullptr),
   _uses (CG->_compile->comp_arena(), 2, 0, nullptr),
   _type((u1)type),
-  _flags(ScalarReplaceable),
+  // If less than GlobalEscape we assume UniqueType else NotUniqueType.
+  // If NoEscape we assume ScalarReplaceable else NotScalarReplaceable.
+  _flags(es < EscapeState::GlobalEscape ? (UniqueType | (es == EscapeState::NoEscape ? ScalarReplaceable : 0)) : 0),
   _escape((u1)es),
   _fields_escape((u1)es),
   _node(n),
