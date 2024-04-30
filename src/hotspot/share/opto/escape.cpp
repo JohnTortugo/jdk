@@ -42,6 +42,55 @@
 #include "opto/rootnode.hpp"
 #include "utilities/macros.hpp"
 
+// static void save_graph(Compile* comp) {
+//   static int counter = 1;
+//
+//   stringStream ss;
+//   ss.print("/tmp/graph__%d.ir", counter);
+//   Unique_Node_List ideal_nodes;
+//   fileStream fstream(ss.as_string());
+//
+//   ideal_nodes.push(comp->root());
+//   for( uint next = 0; next < ideal_nodes.size(); ++next ) {
+//     Node* n = ideal_nodes.at(next);
+//
+//     NOT_PRODUCT(n->dump(nullptr, false, &fstream);)
+//     fstream.cr();
+//
+//     for (uint i=0; i<n->outcnt(); i++) {
+//       Node* m = n->raw_out(i);
+//       ideal_nodes.push(m);
+//     }
+//   }
+//
+//   fstream.flush();
+//   tty->print_cr("Graph dumped to: %s", ss.as_string());
+//   Atomic::inc(&counter);
+// }
+
+void ConnectionGraph::print_edges(PointsToNode* ptn, Unique_Node_List* printed, int indent, bool print_node) {
+  if (indent > 10) return ;
+
+  fileStream* log = _compile->objectsESLog();
+  if (print_node) {
+    for (int i=0; i<indent; i++) log->print("   ");
+    ptn->dump(true, log, true);
+  }
+
+  printed->push(ptn->ideal_node());
+  for (EdgeIterator i(ptn); i.has_next(); i.next()) {
+    PointsToNode* e = i.get();
+    Node* n = e->ideal_node();
+    if (!printed->member(n)) {
+      if (!e->is_Field() || e->as_Field()->is_oop()) {
+        print_edges(e, printed, indent+1, print_node);
+      }
+    }
+  }
+}
+
+
+
 ConnectionGraph::ConnectionGraph(Compile * C, PhaseIterGVN *igvn, int invocation) :
   // If ReduceAllocationMerges is enabled we might call split_through_phi during
   // split_unique_types and that will create additional nodes that need to be
@@ -126,7 +175,23 @@ void ConnectionGraph::do_analysis(Compile *C, PhaseIterGVN *igvn) {
   }
 }
 
-void ConnectionGraph::dump_object_escape_status(GrowableArray<JavaObjectNode*> objects) {
+void ConnectionGraph::find_escape_points(GrowableArray<PointsToNode*>& ptnodes_worklist) {
+  fileStream* log = _compile->objectsESLog();
+  log->print_cr("+++++ Escape Trace +++++");
+
+  for (int next = 0; next < ptnodes_worklist.length(); ++next) {
+    PointsToNode* ptn = ptnodes_worklist.at(next);
+    if (ptn->escape_start()) {
+      Unique_Node_List printed;
+      print_edges(ptn, &printed, 0, true);
+    }
+  }
+
+//  tty->print_cr("+++++ Graph at This Point +++++");
+//  _compile->root()->dump(-1000);
+}
+
+void ConnectionGraph::dump_object_escape_status(GrowableArray<JavaObjectNode*>& objects, GrowableArray<PointsToNode*>& ptnodes_worklist) {
   fileStream* log = _compile->objectsESLog();
   int objects_by_escape_state[] = {0, 0, 0, 0, 0};
 
@@ -138,7 +203,12 @@ void ConnectionGraph::dump_object_escape_status(GrowableArray<JavaObjectNode*> o
     }
   }
 
-  log->print("%s::%s ", _compile->method()->name()->as_utf8(), _compile->method()->holder()->name()->as_utf8());
+  ciMethod* method = _compile->method();
+  Method* m = method->get_Method();
+  InstanceKlass* holder = m->method_holder();
+  Symbol* s = holder->source_file_name();
+  log->print("%s::%s ", holder->name()->as_utf8(), m->name() != nullptr ? m->name_and_sig_as_C_string() : "???");
+  log->print("%s:%d ", s != nullptr ? s->as_utf8() : "???", m->line_number_from_bci(SynchronizationEntryBCI));
   log->print("invocation=%d ", _invocation);
   log->print("objects=%d ", objects_by_escape_state[PointsToNode::EscapeState::UnknownEscape]); // Sum of all the below
   log->print("no_escape=%d ", objects_by_escape_state[PointsToNode::EscapeState::NoEscape]);
@@ -153,15 +223,19 @@ void ConnectionGraph::dump_object_escape_status(GrowableArray<JavaObjectNode*> o
       Node* klass = alloc->in(AllocateNode::KlassNode);
       const TypeKlassPtr* tklass = _igvn->type(klass)->is_klassptr();
       if (tklass->klass_is_exact()) {
-        log->print("  Name [%s]: ", ptn->escape_status_names[ptn->escape_state()]);
+        log->print("  Name [%s, ", ptn->escape_status_names[ptn->escape_state()]);
         tklass->exact_klass()->print_name_on(log);
       } else {
-        log->print("  Name [%s]: ", ptn->escape_status_names[ptn->escape_state()]);
+        log->print("  Name [%s, ", ptn->escape_status_names[ptn->escape_state()]);
         tklass->dump_on(log);
       }
-      log->cr();
+      log->print("] ");
+      ptn->dump(true, log, true);
     }
   }
+
+  find_escape_points(ptnodes_worklist);
+  log->print_cr("\n\n\n@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
 }
 
 bool ConnectionGraph::compute_escape() {
@@ -299,8 +373,8 @@ bool ConnectionGraph::compute_escape() {
       PointsToNode* ptn = ptnodes_worklist.at(next);
       add_final_edges(ptn->ideal_node());
       if (ptn->is_LocalVar() && ptn->edge_count() == 0) {
-        ptn->dump();
-        assert(ptn->as_LocalVar()->edge_count() > 0, "sanity");
+        //ptn->dump();
+        //assert(ptn->as_LocalVar()->edge_count() > 0, "sanity");
       }
     }
     _verify = false;
@@ -322,6 +396,7 @@ bool ConnectionGraph::compute_escape() {
     // All objects escaped or hit time or iterations limits.
     _collecting = false;
     NOT_PRODUCT(escape_state_statistics(java_objects_worklist);)
+    if (LogObjectsES) dump_object_escape_status(java_objects_worklist, ptnodes_worklist);
     return false;
   }
 
@@ -347,6 +422,8 @@ bool ConnectionGraph::compute_escape() {
       }
     }
   }
+
+  if (LogObjectsES) dump_object_escape_status(java_objects_worklist, ptnodes_worklist);
 
   // Propagate NSR (Not Scalar Replaceable) state.
   if (found_nsr_alloc) {
@@ -392,9 +469,6 @@ bool ConnectionGraph::compute_escape() {
     optimize_ideal_graph(ptr_cmp_worklist, storestore_worklist);
   }
 
-  if (LogObjectsES) {
-    dump_object_escape_status(java_objects_worklist);
-  }
 
 #ifndef PRODUCT
   if (PrintEscapeAnalysis) {
@@ -971,7 +1045,8 @@ void ConnectionGraph::add_node_to_connection_graph(Node *n, Unique_Node_List *de
       break;
     }
     case Op_CastX2P: {
-      map_ideal_node(n, phantom_obj);
+      //map_ideal_node(n, phantom_obj);
+      add_java_object(n, PointsToNode::GlobalEscape);
       break;
     }
     case Op_CastPP:
@@ -1007,13 +1082,15 @@ void ConnectionGraph::add_node_to_connection_graph(Node *n, Unique_Node_List *de
     }
     case Op_CreateEx: {
       // assume that all exception objects globally escape
-      map_ideal_node(n, phantom_obj);
+      //map_ideal_node(n, phantom_obj);
+      add_java_object(n, PointsToNode::GlobalEscape);
       break;
     }
     case Op_LoadKlass:
     case Op_LoadNKlass: {
       // Unknown class is loaded
-      map_ideal_node(n, phantom_obj);
+      //map_ideal_node(n, phantom_obj);
+      add_local_var(n, PointsToNode::GlobalEscape);
       break;
     }
     case Op_LoadP:
@@ -1022,13 +1099,15 @@ void ConnectionGraph::add_node_to_connection_graph(Node *n, Unique_Node_List *de
       break;
     }
     case Op_Parm: {
-      map_ideal_node(n, phantom_obj);
+      //map_ideal_node(n, phantom_obj);
+      add_java_object(n, PointsToNode::GlobalEscape);
       break;
     }
     case Op_PartialSubtypeCheck: {
       // Produces Null or notNull and is used in only in CmpP so
       // phantom_obj could be used.
-      map_ideal_node(n, phantom_obj); // Result is unknown
+      // map_ideal_node(n, phantom_obj); // Result is unknown
+      add_java_object(n, PointsToNode::GlobalEscape);
       break;
     }
     case Op_Phi: {
@@ -1282,6 +1361,9 @@ void ConnectionGraph::add_final_edges(Node *n) {
       }
       break;
     }
+    case Op_LoadKlass:
+    case Op_LoadNKlass:
+      break;
     default: {
       // This method should be called only for EA specific nodes which may
       // miss some edges when they were created.
@@ -1294,87 +1376,59 @@ void ConnectionGraph::add_final_edges(Node *n) {
   return;
 }
 
-void ConnectionGraph::add_to_congraph_unsafe_access(Node* n, uint opcode, Unique_Node_List* delayed_worklist) {
-  Node* adr = n->in(MemNode::Address);
-  const Type* adr_type = _igvn->type(adr);
-  adr_type = adr_type->make_ptr();
-  if (adr_type == nullptr) {
+void ConnectionGraph::add_to_congraph_unsafe_access(Node* store, uint opcode, Unique_Node_List* delayed_worklist) {
+  Node* addp = store->in(MemNode::Address);
+  const Type* addp_type = _igvn->type(addp);
+  addp_type = addp_type->make_ptr();
+  if (addp_type == nullptr) {
     return; // skip dead nodes
   }
-  if (adr_type->isa_oopptr()
+
+  if (addp_type->isa_oopptr()
       || ((opcode == Op_StoreP || opcode == Op_StoreN || opcode == Op_StoreNKlass)
-          && adr_type == TypeRawPtr::NOTNULL
-          && is_captured_store_address(adr))) {
-    delayed_worklist->push(n); // Process it later.
-#ifdef ASSERT
-    assert (adr->is_AddP(), "expecting an AddP");
-    if (adr_type == TypeRawPtr::NOTNULL) {
-      // Verify a raw address for a store captured by Initialize node.
-      int offs = (int) _igvn->find_intptr_t_con(adr->in(AddPNode::Offset), Type::OffsetBot);
-      assert(offs != Type::OffsetBot, "offset must be a constant");
-    }
-#endif
+          && addp_type == TypeRawPtr::NOTNULL
+          && is_captured_store_address(addp))) {
+    delayed_worklist->push(store); // Process it later.
   } else {
     // Ignore copy the displaced header to the BoxNode (OSR compilation).
-    if (adr->is_BoxLock()) {
+    if (addp->is_BoxLock()) {
       return;
     }
     // Stored value escapes in unsafe access.
-    if ((opcode == Op_StoreP) && adr_type->isa_rawptr()) {
-      delayed_worklist->push(n); // Process unsafe access later.
+    if ((opcode == Op_StoreP) && addp_type->isa_rawptr()) {
+      delayed_worklist->push(store); // Process unsafe access later.
       return;
     }
-#ifdef ASSERT
-    n->dump(1);
-    assert(false, "not unsafe");
-#endif
   }
 }
 
-bool ConnectionGraph::add_final_edges_unsafe_access(Node* n, uint opcode) {
-  Node* adr = n->in(MemNode::Address);
-  const Type *adr_type = _igvn->type(adr);
-  adr_type = adr_type->make_ptr();
-#ifdef ASSERT
-  if (adr_type == nullptr) {
-    n->dump(1);
-    assert(adr_type != nullptr, "dead node should not be on list");
-    return true;
-  }
-#endif
+bool ConnectionGraph::add_final_edges_unsafe_access(Node* store, uint opcode) {
+  Node* addp = store->in(MemNode::Address);
+  const Type *addp_type = _igvn->type(addp);
+  addp_type = addp_type->make_ptr();
 
-  if (adr_type->isa_oopptr()
+  if (addp_type->isa_oopptr()
       || ((opcode == Op_StoreP || opcode == Op_StoreN || opcode == Op_StoreNKlass)
-           && adr_type == TypeRawPtr::NOTNULL
-           && is_captured_store_address(adr))) {
+           && addp_type == TypeRawPtr::NOTNULL
+           && is_captured_store_address(addp))) {
     // Point Address to Value
-    PointsToNode* adr_ptn = ptnode_adr(adr->_idx);
-    assert(adr_ptn != nullptr &&
-           adr_ptn->as_Field()->is_oop(), "node should be registered");
-    Node* val = n->in(MemNode::ValueIn);
-    PointsToNode* ptn = ptnode_adr(val->_idx);
-    assert(ptn != nullptr, "node should be registered");
-    add_edge(adr_ptn, ptn);
+    PointsToNode* adr_ptn = ptnode_adr(addp->_idx);
+    Node* value = store->in(MemNode::ValueIn);
+    PointsToNode* value_ptn = ptnode_adr(value->_idx);
+    add_edge(adr_ptn, value_ptn);
     return true;
-  } else if ((opcode == Op_StoreP) && adr_type->isa_rawptr()) {
-    // Stored value escapes in unsafe access.
-    Node* val = n->in(MemNode::ValueIn);
-    PointsToNode* ptn = ptnode_adr(val->_idx);
-    assert(ptn != nullptr, "node should be registered");
-    set_escape_state(ptn, PointsToNode::GlobalEscape NOT_PRODUCT(COMMA "stored at raw address"));
+  } else if ((opcode == Op_StoreP) && addp_type->isa_rawptr()) {
+    Node* val = store->in(MemNode::ValueIn);
+    PointsToNode* value_ptn = ptnode_adr(val->_idx);
+    set_escape_state(value_ptn, PointsToNode::GlobalEscape NOT_PRODUCT(COMMA "stored at raw address"));
     // Add edge to object for unsafe access with offset.
-    PointsToNode* adr_ptn = ptnode_adr(adr->_idx);
-    assert(adr_ptn != nullptr, "node should be registered");
-    if (adr_ptn->is_Field()) {
-      assert(adr_ptn->as_Field()->is_oop(), "should be oop field");
-      add_edge(adr_ptn, ptn);
+    PointsToNode* addp_ptn = ptnode_adr(addp->_idx);
+    if (addp_ptn->is_Field()) {
+      add_edge(addp_ptn, value_ptn);
     }
     return true;
   }
-#ifdef ASSERT
-  n->dump(1);
-  assert(false, "not unsafe");
-#endif
+
   return false;
 }
 
@@ -1499,7 +1553,8 @@ void ConnectionGraph::add_call_node(CallNode* call) {
           add_local_var(call, PointsToNode::ArgEscape);
         } else {
           // Returns unknown object.
-          map_ideal_node(call, phantom_obj);
+          //map_ideal_node(call, phantom_obj);
+          add_java_object(call, PointsToNode::GlobalEscape);
         }
       }
     }
@@ -1507,7 +1562,8 @@ void ConnectionGraph::add_call_node(CallNode* call) {
     // An other type of call, assume the worst case:
     // returned value is unknown and globally escapes.
     assert(call->Opcode() == Op_CallDynamicJava, "add failed case check");
-    map_ideal_node(call, phantom_obj);
+    //map_ideal_node(call, phantom_obj);
+    add_java_object(call, PointsToNode::GlobalEscape);
   }
 }
 
@@ -1745,32 +1801,18 @@ bool ConnectionGraph::complete_connection_graph(
                          GrowableArray<JavaObjectNode*>& non_escaped_allocs_worklist,
                          GrowableArray<JavaObjectNode*>& java_objects_worklist,
                          GrowableArray<FieldNode*>&      oop_fields_worklist) {
-  // Normally only 1-3 passes needed to build Connection Graph depending
-  // on graph complexity. Observed 8 passes in jvm2008 compiler.compiler.
-  // Set limit to 20 to catch situation when something did go wrong and
-  // bailout Escape Analysis.
-  // Also limit build time to 20 sec (60 in debug VM), EscapeAnalysisTimeout flag.
-#define GRAPH_BUILD_ITER_LIMIT 20
-
   // Propagate GlobalEscape and ArgEscape escape states and check that
   // we still have non-escaping objects. The method pushs on _worklist
   // Field nodes which reference phantom_object.
   if (!find_non_escaped_objects(ptnodes_worklist, non_escaped_allocs_worklist)) {
     return false; // Nothing to do.
   }
+
   // Now propagate references to all JavaObject nodes.
   int java_objects_length = java_objects_worklist.length();
-  elapsedTimer build_time;
-  build_time.start();
-  elapsedTimer time;
-  bool timeout = false;
   int new_edges = 1;
-  int iterations = 0;
   do {
-    while ((new_edges > 0) &&
-           (iterations++ < GRAPH_BUILD_ITER_LIMIT)) {
-      double start_time = time.seconds();
-      time.start();
+    while (new_edges > 0) {
       new_edges = 0;
       // Propagate references to phantom_object for nodes pushed on _worklist
       // by find_non_escaped_objects() and find_field_value().
@@ -1778,83 +1820,24 @@ bool ConnectionGraph::complete_connection_graph(
       for (int next = 0; next < java_objects_length; ++next) {
         JavaObjectNode* ptn = java_objects_worklist.at(next);
         new_edges += add_java_object_edges(ptn, true);
-
-#define SAMPLE_SIZE 4
-        if ((next % SAMPLE_SIZE) == 0) {
-          // Each 4 iterations calculate how much time it will take
-          // to complete graph construction.
-          time.stop();
-          // Poll for requests from shutdown mechanism to quiesce compiler
-          // because Connection graph construction may take long time.
-          CompileBroker::maybe_block();
-          double stop_time = time.seconds();
-          double time_per_iter = (stop_time - start_time) / (double)SAMPLE_SIZE;
-          double time_until_end = time_per_iter * (double)(java_objects_length - next);
-          if ((start_time + time_until_end) >= EscapeAnalysisTimeout) {
-            timeout = true;
-            break; // Timeout
-          }
-          start_time = stop_time;
-          time.start();
-        }
-#undef SAMPLE_SIZE
-
       }
-      if (timeout) break;
       if (new_edges > 0) {
         // Update escape states on each iteration if graph was updated.
         if (!find_non_escaped_objects(ptnodes_worklist, non_escaped_allocs_worklist)) {
           return false; // Nothing to do.
         }
       }
-      time.stop();
-      if (time.seconds() >= EscapeAnalysisTimeout) {
-        timeout = true;
-        break;
-      }
     }
-    if ((iterations < GRAPH_BUILD_ITER_LIMIT) && !timeout) {
-      time.start();
-      // Find fields which have unknown value.
-      int fields_length = oop_fields_worklist.length();
-      for (int next = 0; next < fields_length; next++) {
-        FieldNode* field = oop_fields_worklist.at(next);
-        if (field->edge_count() == 0) {
-          new_edges += find_field_value(field);
-          // This code may added new edges to phantom_object.
-          // Need an other cycle to propagate references to phantom_object.
-        }
+
+    // Find fields which have unknown value.
+    int fields_length = oop_fields_worklist.length();
+    for (int next = 0; next < fields_length; next++) {
+      FieldNode* field = oop_fields_worklist.at(next);
+      if (field->edge_count() == 0) {
+        new_edges += find_field_value(field);
       }
-      time.stop();
-      if (time.seconds() >= EscapeAnalysisTimeout) {
-        timeout = true;
-        break;
-      }
-    } else {
-      new_edges = 0; // Bailout
     }
   } while (new_edges > 0);
-
-  build_time.stop();
-  _build_time = build_time.seconds();
-  _build_iterations = iterations;
-
-  // Bailout if passed limits.
-  if ((iterations >= GRAPH_BUILD_ITER_LIMIT) || timeout) {
-    Compile* C = _compile;
-    if (C->log() != nullptr) {
-      C->log()->begin_elem("connectionGraph_bailout reason='reached ");
-      C->log()->text("%s", timeout ? "time" : "iterations");
-      C->log()->end_elem(" limit'");
-    }
-    assert(ExitEscapeAnalysisOnTimeout, "infinite EA connection graph build during invocation %d (%f sec, %d iterations) with %d nodes and worklist size %d",
-           _invocation, _build_time, _build_iterations, nodes_size(), ptnodes_worklist.length());
-    // Possible infinite build_connection_graph loop,
-    // bailout (no changes to ideal graph were made).
-    return false;
-  }
-
-#undef GRAPH_BUILD_ITER_LIMIT
 
   // Find fields initialized by null for non-escaping Allocations.
   int non_escaped_length = non_escaped_allocs_worklist.length();
@@ -1879,6 +1862,7 @@ bool ConnectionGraph::complete_connection_graph(
         ini->set_does_not_escape();
     }
   }
+
   return true; // Finished graph construction.
 }
 
@@ -1896,13 +1880,15 @@ bool ConnectionGraph::find_non_escaped_objects(GrowableArray<PointsToNode*>& ptn
       escape_worklist.push(ptn);
     }
   }
+
   // Set escape states to referenced nodes (edges list).
   while (escape_worklist.length() > 0) {
     PointsToNode* ptn = escape_worklist.pop();
-    PointsToNode::EscapeState es  = ptn->escape_state();
-    PointsToNode::EscapeState field_es = ptn->fields_escape_state();
+    PointsToNode::EscapeState ptn_es = ptn->escape_state();
+    PointsToNode::EscapeState fld_es = ptn->fields_escape_state();
+
     if (ptn->is_Field() && ptn->as_Field()->is_oop() &&
-        es >= PointsToNode::ArgEscape) {
+        ptn_es >= PointsToNode::ArgEscape) {
       // GlobalEscape or ArgEscape state of field means it has unknown value.
       if (add_edge(ptn, phantom_obj)) {
         // New edge was added
@@ -1914,31 +1900,31 @@ bool ConnectionGraph::find_non_escaped_objects(GrowableArray<PointsToNode*>& ptn
       if (e->is_Arraycopy()) {
         assert(ptn->arraycopy_dst(), "sanity");
         // Propagate only fields escape state through arraycopy edge.
-        if (e->fields_escape_state() < field_es) {
-          set_fields_escape_state(e, field_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
+        if (e->fields_escape_state() < fld_es) {
+          set_fields_escape_state(e, fld_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
           escape_worklist.push(e);
         }
-      } else if (es >= field_es) {
+      } else if (ptn_es >= fld_es) {
         // fields_escape_state is also set to 'es' if it is less than 'es'.
-        if (e->escape_state() < es) {
-          set_escape_state(e, es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
+        if (e->escape_state() < ptn_es) {
+          set_escape_state(e, ptn_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
           escape_worklist.push(e);
         }
       } else {
         // Propagate field escape state.
         bool es_changed = false;
-        if (e->fields_escape_state() < field_es) {
-          set_fields_escape_state(e, field_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
+        if (e->fields_escape_state() < fld_es) {
+          set_fields_escape_state(e, fld_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
           es_changed = true;
         }
-        if ((e->escape_state() < field_es) &&
+        if ((e->escape_state() < fld_es) &&
             e->is_Field() && ptn->is_JavaObject() &&
             e->as_Field()->is_oop()) {
           // Change escape state of referenced fields.
-          set_escape_state(e, field_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
+          set_escape_state(e, fld_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
           es_changed = true;
-        } else if (e->escape_state() < es) {
-          set_escape_state(e, es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
+        } else if (e->escape_state() < ptn_es) {
+          set_escape_state(e, ptn_es NOT_PRODUCT(COMMA trace_propagate_message(ptn)));
           es_changed = true;
         }
         if (es_changed) {
@@ -4273,13 +4259,13 @@ void PointsToNode::dump(bool print_state, outputStream* out, bool newline) const
     }
     out->print(") ");
   }
-  out->print("edges: [");
+  out->print("consumes_from: [");
   for (EdgeIterator i(this); i.has_next(); i.next()) {
     PointsToNode* e = i.get();
     out->print(" %d%s%s", e->pidx(),(e->is_JavaObject() ? "P" : (e->is_Field() ? "F" : "")), e->is_Arraycopy() ? "cp" : "");
   }
   out->print("] ");
-  out->print("uses: [");
+  out->print("produces_to: [");
   for (UseIterator i(this); i.has_next(); i.next()) {
     PointsToNode* u = i.get();
     bool is_base = false;
@@ -4297,7 +4283,8 @@ void PointsToNode::dump(bool print_state, outputStream* out, bool newline) const
   if (_node == nullptr) {
     out->print("0:null%s", newline ? "\n" : "");
   } else {
-    out->print("%d:%s%s", _node->_idx, _node->Name(), newline ? "\n" : "");
+    //out->print("%d:%s%s", _node->_idx, _node->Name(), newline ? "\n" : "");
+    _node->dump(newline ? "\n" : "", false, out, nullptr);
   }
 }
 

@@ -592,7 +592,9 @@ private:
   // Notify optimizer that a node has been modified
   void record_for_optimizer(Node *n);
 
-  void dump_object_escape_status(GrowableArray<JavaObjectNode*> objects);
+  void print_edges(PointsToNode* ptn, Unique_Node_List* printed, int indent, bool print_node);
+  void find_escape_points(GrowableArray<PointsToNode*>& ptnodes_worklist);
+  void dump_object_escape_status(GrowableArray<JavaObjectNode*>& objects, GrowableArray<PointsToNode*>& ptnodes_worklist);
 
   // Compute the escape information
   bool compute_escape();
