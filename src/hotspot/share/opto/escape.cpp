@@ -162,7 +162,7 @@ bool ConnectionGraph::compute_escape() {
   GrowableArray<MemBarStoreStoreNode*> storestore_worklist;
   GrowableArray<ArrayCopyNode*>  arraycopy_worklist;
   GrowableArray<PointsToNode*>   ptnodes_worklist;
-  GrowableArray<JavaObjectNode*> unique_types;
+  GrowableArray<JavaObjectNode*> unique_typeable;
   GrowableArray<JavaObjectNode*> java_objects_worklist;
   GrowableArray<JavaObjectNode*> non_escaped_allocs_worklist;
   GrowableArray<FieldNode*>      oop_fields_worklist;
@@ -313,53 +313,48 @@ bool ConnectionGraph::compute_escape() {
   }
 
   // Initially assume all java_objects are unique types
-  unique_types.appendAll(&java_objects_worklist);
+  unique_typeable.appendAll(&java_objects_worklist);
 
   bool recheck_unique_types = true;
+  // TODO: Do we need really to keep rechecking?
   while (recheck_unique_types) {
     recheck_unique_types = false;
 
-    for (int next = 0; next < unique_types.length(); next++) {
-      JavaObjectNode* ptn = unique_types.at(next);
+    for (int next = unique_typeable.length(); next > 0; next--) {
+      JavaObjectNode* ptn = unique_typeable.at(next);
 
-      if (ptn->unique_type()) {
-        adjust_unique_type_state(ptn, reducible_merges);
+      adjust_unique_type_state(ptn, reducible_merges);
 
-        if (ptn->unique_type()) {
+      if (!ptn->unique_type()) {
+        recheck_unique_types = true;
+        unique_typeable.remove_at(next);
+        next++;
+      }
+    }
+  }
+
+  // If we don't need to recheck unique types,
+  // we can move to check scalar replaceable state.
+  GrowableArray<JavaObjectNode*> scalar_replaceable(unique_typeable);
+  bool recheck_scalar_replaceable = true;
+  while (recheck_scalar_replaceable) {
+    recheck_scalar_replaceable = false;
+
+    for (int next = 0; next < scalar_replaceable.length(); next++) {
+      JavaObjectNode* ptn = scalar_replaceable.at(next);
+
+      if (ptn->scalar_replaceable()) {
+        adjust_scalar_replaceable_state(ptn);
+
+        if (ptn->scalar_replaceable()) {
           continue;
         }
       }
 
-      recheck_unique_types = true;
-      unique_types.remove_at(next);
+      recheck_scalar_replaceable = true;
+      scalar_replaceable.remove_at(next);
+      find_scalar_replaceable_allocs(scalar_replaceable);
       break;
-    }
-
-    // If we don't need to recheck unique types,
-    // we can move to check scalar replaceable state.
-    if (!recheck_unique_types) {
-      GrowableArray<JavaObjectNode*> scalar_replaceable(unique_types);
-      bool recheck_scalar_replaceable = true;
-      while (recheck_scalar_replaceable) {
-        recheck_scalar_replaceable = false;
-
-        for (int next = 0; next < scalar_replaceable.length(); next++) {
-          JavaObjectNode* ptn = scalar_replaceable.at(next);
-
-          if (ptn->scalar_replaceable()) {
-            adjust_scalar_replaceable_state(ptn);
-
-            if (ptn->scalar_replaceable()) {
-              continue;
-            }
-          }
-
-          recheck_scalar_replaceable = true;
-          scalar_replaceable.remove_at(next);
-          find_scalar_replaceable_allocs(scalar_replaceable);
-          break;
-        }
-      }
     }
   }
 
@@ -371,8 +366,8 @@ bool ConnectionGraph::compute_escape() {
     Node* phi = reducible_merges.at(i);
     alloc_worklist.append(phi);
   }
-  for (int next = 0; next < unique_types.length(); next++) {
-    JavaObjectNode* ptr = unique_types.at(next);
+  for (int next = 0; next < unique_typeable.length(); next++) {
+    JavaObjectNode* ptr = unique_typeable.at(next);
     if (ptr != phantom_obj) {
       alloc_worklist.append(ptr->ideal_node());
     }
