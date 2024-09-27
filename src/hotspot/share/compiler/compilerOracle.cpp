@@ -235,24 +235,26 @@ void TypedMethodOptionMatcher::print() {
   enum OptionType type = option2type(_option);
   switch (type) {
     case OptionType::Intx:
-    tty->print_cr(" intx %s = " INTX_FORMAT, name, value<intx>());
+    tty->print(" intx %s = " INTX_FORMAT, name, value<intx>());
     break;
     case OptionType::Uintx:
-    tty->print_cr(" uintx %s = " UINTX_FORMAT, name, value<uintx>());
+    tty->print(" uintx %s = " UINTX_FORMAT, name, value<uintx>());
     break;
     case OptionType::Bool:
-    tty->print_cr(" bool %s = %s", name, value<bool>() ? "true" : "false");
+    tty->print(" bool %s = %s", name, value<bool>() ? "true" : "false");
     break;
     case OptionType::Double:
-    tty->print_cr(" double %s = %f", name, value<double>());
+    tty->print(" double %s = %f", name, value<double>());
     break;
     case OptionType::Ccstr:
     case OptionType::Ccstrlist:
-    tty->print_cr(" const char* %s = '%s'", name, value<ccstr>());
+    tty->print(" const char* %s = '%s'", name, value<ccstr>());
     break;
   default:
     ShouldNotReachHere();
   }
+  print_comp_levels(tty);
+  tty->cr();
 }
 
 void TypedMethodOptionMatcher::print_all() {
@@ -850,8 +852,8 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
         assert(false, "Ccstrlist type option missing validator");
       }
 
-      register_command(matcher, option, (ccstr) value);
       parse_comp_level_if_present(line, bytes_read, matcher);
+      register_command(matcher, option, (ccstr) value);
       return;
     } else {
       jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
@@ -868,14 +870,14 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
       if (strcasecmp(value, "true") == 0) {
         total_bytes_read += bytes_read;
         line += bytes_read;
-        register_command(matcher, option, true);
         parse_comp_level_if_present(line, bytes_read, matcher);
+        register_command(matcher, option, true);
         return;
       } else if (strcasecmp(value, "false") == 0) {
         total_bytes_read += bytes_read;
         line += bytes_read;
-        register_command(matcher, option, false);
         parse_comp_level_if_present(line, bytes_read, matcher);
+        register_command(matcher, option, false);
         return;
       } else {
         jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
@@ -898,8 +900,8 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
       jio_snprintf(value, sizeof(value), "%s.%s", buffer[0], buffer[1]);
       total_bytes_read += bytes_read;
       line += bytes_read;
-      register_command(matcher, option, atof(value));
       parse_comp_level_if_present(line, bytes_read, matcher);
+      register_command(matcher, option, atof(value));
       return;
     } else {
       jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
@@ -1010,8 +1012,8 @@ bool CompilerOracle::parse_from_line(char* line) {
     // Two types of trailing options are
     // supported:
     //
-    // (1) CompileCommand=option,Klass::method,option[,<comp_level>]
-    // (2) CompileCommand=option,Klass::method,type,option,value[,<comp_level>]
+    // (1) CompileCommand=option,Klass::method,option
+    // (2) CompileCommand=option,Klass::method,type,option,value
     //
     // Type (1) is used to enable a boolean option for a method.
     //

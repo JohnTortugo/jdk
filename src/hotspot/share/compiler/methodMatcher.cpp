@@ -398,12 +398,11 @@ void MethodMatcher::print_base(outputStream* st) {
   if (signature() != nullptr) {
     signature()->print_utf8_on(st);
   }
-  print_comp_levels(st);
 }
 
 void MethodMatcher::print_comp_levels(outputStream* st) {
   if (_comp_level != CompLevel::CompLevel_all) {
-    st->print(" for comp. level %d ", _comp_level);
+    st->print(" for compilation level %d", _comp_level);
   }
 }
 
