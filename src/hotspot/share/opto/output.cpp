@@ -1158,7 +1158,8 @@ void PhaseOutput::Process_OopMap_Node(MachNode *mach, int current_offset) {
 
         for (int j = 0; j< merge->possible_objects()->length(); j++) {
           ObjectValue* ov = merge->possible_objects()->at(j)->as_ObjectValue();
-          bool is_root = locarray->contains(ov) ||
+          bool is_root = ov->is_root() ||
+                         locarray->contains(ov) ||
                          exparray->contains(ov) ||
                          contains_as_owner(monarray, ov) ||
                          contains_as_scalarized_obj(jvms, sfn, objs, ov);
