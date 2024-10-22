@@ -44,64 +44,64 @@ class methodHandle;
   type(Ccstrlist, "ccstrlist") \
   type(Double, "double")
 
-//       COMPILECOMMAND_OPTIONS: option, name, type
-#define COMPILECOMMAND_OPTIONS(option)                                                          \
-            option(Help,                          "help",                          Unknown)     \
-            option(Quiet,                         "quiet",                         Unknown)     \
-            option(Log,                           "log",                           Bool)        \
-            option(Print,                         "print",                         Bool)        \
-            option(Inline,                        "inline",                        Bool)        \
-            option(DontInline,                    "dontinline",                    Bool)        \
-            option(Blackhole,                     "blackhole",                     Bool)        \
-            option(CompileOnly,                   "compileonly",                   Bool)        \
-            option(Exclude,                       "exclude",                       Bool)        \
-            option(Break,                         "break",                         Bool)        \
-            option(BreakAtExecute,                "BreakAtExecute",                Bool)        \
-            option(BreakAtCompile,                "BreakAtCompile",                Bool)        \
-            option(MemLimit,                      "MemLimit",                      Intx)        \
-            option(MemStat,                       "MemStat",                       Uintx)       \
-            option(PrintAssembly,                 "PrintAssembly",                 Bool)        \
-            option(PrintCompilation,              "PrintCompilation",              Bool)        \
-            option(PrintInlining,                 "PrintInlining",                 Bool)        \
-            option(PrintIntrinsics,               "PrintIntrinsics",               Bool)        \
-            option(PrintNMethods,                 "PrintNMethods",                 Bool)        \
-            option(PrintOptoAssembly,             "PrintOptoAssembly",             Bool)        \
-            option(PrintDebugInfo,                "PrintDebugInfo",                Bool)        \
-            option(PrintRelocations,              "PrintRelocations",              Bool)        \
-            option(PrintDependencies,             "PrintDependencies",             Bool)        \
-            option(BackgroundCompilation,         "BackgroundCompilation",         Bool)        \
-            option(RepeatCompilation,             "RepeatCompilation",             Intx)        \
-            option(ReplayInline,                  "ReplayInline",                  Bool)        \
-            option(DumpReplay,                    "DumpReplay",                    Bool)        \
-            option(DumpInline,                    "DumpInline",                    Bool)        \
-            option(CompileThresholdScaling,       "CompileThresholdScaling",       Double)      \
-            option(ControlIntrinsic,              "ControlIntrinsic",              Ccstrlist)   \
-            option(DisableIntrinsic,              "DisableIntrinsic",              Ccstrlist)   \
-            option(BlockLayoutByFrequency,        "BlockLayoutByFrequency",        Bool)        \
-            option(TraceOptoPipelining,           "TraceOptoPipelining",           Bool)        \
-            option(TraceOptoOutput,               "TraceOptoOutput",               Bool)        \
-            option(TraceSpilling,                 "TraceSpilling",                 Bool)        \
-            option(Vectorize,                     "Vectorize",                     Bool)        \
-            option(CloneMapDebug,                 "CloneMapDebug",                 Bool)        \
-            option(IncrementalInlineForceCleanup, "IncrementalInlineForceCleanup", Bool)        \
-            option(MaxNodeLimit,                  "MaxNodeLimit",                  Intx)        \
-NOT_PRODUCT(option(TraceEscapeAnalysis,           "TraceEscapeAnalysis",           Bool))       \
-NOT_PRODUCT(option(PrintIdeal,                    "PrintIdeal",                    Bool))       \
-NOT_PRODUCT(option(PrintIdealPhase,               "PrintIdealPhase",               Ccstrlist))  \
-NOT_PRODUCT(option(IGVPrintLevel,                 "IGVPrintLevel",                 Intx))       \
-NOT_PRODUCT(option(TraceAutoVectorization,        "TraceAutoVectorization",        Ccstrlist))  \
-NOT_PRODUCT(option(TestOptionInt,                 "TestOptionInt",                 Intx))       \
-NOT_PRODUCT(option(TestOptionUint,                "TestOptionUint",                Uintx))      \
-NOT_PRODUCT(option(TestOptionBool,                "TestOptionBool",                Bool))       \
-NOT_PRODUCT(option(TestOptionBool2,               "TestOptionBool2",               Bool))       \
-NOT_PRODUCT(option(TestOptionStr,                 "TestOptionStr",                 Ccstr))      \
-NOT_PRODUCT(option(TestOptionList,                "TestOptionList",                Ccstrlist))  \
-NOT_PRODUCT(option(TestOptionDouble,              "TestOptionDouble",              Double))     \
-            option(Option,                        "option",                        Unknown)     \
-            option(Unknown,                       "unknown",                       Unknown)
+//       COMPILECOMMAND_OPTIONS: option, name, type, applicable_levels
+#define COMPILECOMMAND_OPTIONS(option)                                                                                                           \
+            option(Help,                          "help",                          Unknown,       CompLevel::CompLevel_all)                      \
+            option(Quiet,                         "quiet",                         Unknown,       CompLevel::CompLevel_all)                      \
+            option(Log,                           "log",                           Bool,          CompLevel::CompLevel_all)                      \
+            option(Print,                         "print",                         Bool,          CompLevel::CompLevel_all)                      \
+            option(Inline,                        "inline",                        Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(DontInline,                    "dontinline",                    Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(Blackhole,                     "blackhole",                     Bool,          CompLevel::CompLevel_all)                      \
+            option(CompileOnly,                   "compileonly",                   Bool,          CompLevel::CompLevel_all)                      \
+            option(Exclude,                       "exclude",                       Bool,          CompLevel::CompLevel_all)                      \
+            option(Break,                         "break",                         Bool,          CompLevel::CompLevel_all)                      \
+            option(BreakAtExecute,                "BreakAtExecute",                Bool,          CompLevel::CompLevel_all)                      \
+            option(BreakAtCompile,                "BreakAtCompile",                Bool,          CompLevel::CompLevel_all)                      \
+            option(MemLimit,                      "MemLimit",                      Intx,          CompLevel::CompLevel_all)                      \
+            option(MemStat,                       "MemStat",                       Uintx,         CompLevel::CompLevel_all)                      \
+            option(PrintAssembly,                 "PrintAssembly",                 Bool,          CompLevel::CompLevel_all)                      \
+            option(PrintCompilation,              "PrintCompilation",              Bool,          CompLevel::CompLevel_all)                      \
+            option(PrintInlining,                 "PrintInlining",                 Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(PrintIntrinsics,               "PrintIntrinsics",               Bool,          CompLevel::CompLevel_all)                      \
+            option(PrintNMethods,                 "PrintNMethods",                 Bool,          CompLevel::CompLevel_all)                      \
+            option(PrintOptoAssembly,             "PrintOptoAssembly",             Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(PrintDebugInfo,                "PrintDebugInfo",                Bool,          CompLevel::CompLevel_all)                      \
+            option(PrintRelocations,              "PrintRelocations",              Bool,          CompLevel::CompLevel_all)                      \
+            option(PrintDependencies,             "PrintDependencies",             Bool,          CompLevel::CompLevel_all)                      \
+            option(BackgroundCompilation,         "BackgroundCompilation",         Bool,          CompLevel::CompLevel_all)                      \
+            option(RepeatCompilation,             "RepeatCompilation",             Intx,          CompLevel::CompLevel_all)                      \
+            option(ReplayInline,                  "ReplayInline",                  Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(DumpReplay,                    "DumpReplay",                    Bool,          CompLevel::CompLevel_all)                      \
+            option(DumpInline,                    "DumpInline",                    Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(CompileThresholdScaling,       "CompileThresholdScaling",       Double,        CompLevel::CompLevel_all)                      \
+            option(ControlIntrinsic,              "ControlIntrinsic",              Ccstrlist,     CompLevel::CompLevel_all)                      \
+            option(DisableIntrinsic,              "DisableIntrinsic",              Ccstrlist,     CompLevel::CompLevel_all)                      \
+            option(BlockLayoutByFrequency,        "BlockLayoutByFrequency",        Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(TraceOptoPipelining,           "TraceOptoPipelining",           Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(TraceOptoOutput,               "TraceOptoOutput",               Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(TraceSpilling,                 "TraceSpilling",                 Bool,          CompLevel::CompLevel_all)                      \
+            option(Vectorize,                     "Vectorize",                     Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(CloneMapDebug,                 "CloneMapDebug",                 Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(IncrementalInlineForceCleanup, "IncrementalInlineForceCleanup", Bool,          CompLevel::CompLevel_full_optimization)        \
+            option(MaxNodeLimit,                  "MaxNodeLimit",                  Intx,          CompLevel::CompLevel_full_optimization)        \
+NOT_PRODUCT(option(TraceEscapeAnalysis,           "TraceEscapeAnalysis",           Bool,          CompLevel::CompLevel_full_optimization))       \
+NOT_PRODUCT(option(PrintIdeal,                    "PrintIdeal",                    Bool,          CompLevel::CompLevel_full_optimization))       \
+NOT_PRODUCT(option(PrintIdealPhase,               "PrintIdealPhase",               Ccstrlist,     CompLevel::CompLevel_full_optimization))       \
+NOT_PRODUCT(option(IGVPrintLevel,                 "IGVPrintLevel",                 Intx,          CompLevel::CompLevel_full_optimization))       \
+NOT_PRODUCT(option(TraceAutoVectorization,        "TraceAutoVectorization",        Ccstrlist,     CompLevel::CompLevel_full_optimization))       \
+NOT_PRODUCT(option(TestOptionInt,                 "TestOptionInt",                 Intx,          CompLevel::CompLevel_all))                     \
+NOT_PRODUCT(option(TestOptionUint,                "TestOptionUint",                Uintx,         CompLevel::CompLevel_all))                     \
+NOT_PRODUCT(option(TestOptionBool,                "TestOptionBool",                Bool,          CompLevel::CompLevel_all))                     \
+NOT_PRODUCT(option(TestOptionBool2,               "TestOptionBool2",               Bool,          CompLevel::CompLevel_all))                     \
+NOT_PRODUCT(option(TestOptionStr,                 "TestOptionStr",                 Ccstr,         CompLevel::CompLevel_all))                     \
+NOT_PRODUCT(option(TestOptionList,                "TestOptionList",                Ccstrlist,     CompLevel::CompLevel_all))                     \
+NOT_PRODUCT(option(TestOptionDouble,              "TestOptionDouble",              Double,        CompLevel::CompLevel_all))                     \
+            option(Option,                        "option",                        Unknown,       CompLevel::CompLevel_all)                      \
+            option(Unknown,                       "unknown",                       Unknown,       CompLevel::CompLevel_all)
 
 enum class CompileCommandEnum : int {
-  #define enum_of_options(option, name, ctype) option,
+  #define enum_of_options(option, name, ctype, levels) option,
     COMPILECOMMAND_OPTIONS(enum_of_options)
   #undef enum_of_options
   Count

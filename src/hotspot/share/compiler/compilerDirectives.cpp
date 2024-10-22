@@ -306,7 +306,7 @@ DirectiveSet::DirectiveSet(CompilerDirectives* d) :
   _ideal_phase_name_set(PHASE_NUM_TYPES, mtCompiler),
   _trace_auto_vectorization_tags(TRACE_AUTO_VECTORIZATION_TAG_NUM, mtCompiler)
 {
-#define init_defaults_definition(name, type, dvalue, compiler, clevel) this->name##Option = dvalue;
+#define init_defaults_definition(name, type, dvalue, compiler) this->name##Option = dvalue;
   compilerdirectives_common_flags(init_defaults_definition)
   compilerdirectives_c2_flags(init_defaults_definition)
   compilerdirectives_c1_flags(init_defaults_definition)
@@ -324,7 +324,7 @@ DirectiveSet::~DirectiveSet() {
     tmp = next;
   }
 
-#define free_string_flags(name, type, dvalue, cc_flag, clevel) if (_modified[name##Index]) os::free(const_cast<char*>(name##Option));
+#define free_string_flags(name, type, dvalue, cc_flag) if (_modified[name##Index]) os::free(const_cast<char*>(name##Option));
   compilerdirectives_common_string_flags(free_string_flags)
   compilerdirectives_c2_string_flags(free_string_flags)
   compilerdirectives_c1_string_flags(free_string_flags)
@@ -428,7 +428,7 @@ DirectiveSet* DirectiveSet::compilecommand_compatibility_init(const methodHandle
     }
 
     // inline and dontinline (including exclude) are implemented in the directiveset accessors
-#define init_default_cc(name, type, dvalue, cc_flag, clevel) { type v; if (!_modified[name##Index] && CompileCommandEnum::cc_flag != CompileCommandEnum::Unknown && CompilerOracle::has_option_value(method, CompileCommandEnum::cc_flag, clevel, v) && v != this->name##Option) { set.cloned()->name##Option = v; } }
+#define init_default_cc(name, type, dvalue, cc_flag) { type v; if (!_modified[name##Index] && CompileCommandEnum::cc_flag != CompileCommandEnum::Unknown && CompilerOracle::has_option_value(method, CompileCommandEnum::cc_flag, comp_level, v) && v != this->name##Option) { set.cloned()->name##Option = v; } }
     compilerdirectives_common_flags(init_default_cc)
     compilerdirectives_c2_flags(init_default_cc)
     compilerdirectives_c1_flags(init_default_cc)
@@ -619,13 +619,13 @@ DirectiveSet* DirectiveSet::clone(DirectiveSet const* src) {
     tmp = tmp->next();
   }
 
-  #define copy_members_definition(name, type, dvalue, cc_flag, clevel) set->name##Option = src->name##Option;
+  #define copy_members_definition(name, type, dvalue, cc_flag) set->name##Option = src->name##Option;
     compilerdirectives_common_other_flags(copy_members_definition)
     compilerdirectives_c2_other_flags(copy_members_definition)
     compilerdirectives_c1_other_flags(copy_members_definition)
   #undef copy_members_definition
 
-#define copy_string_members_definition(name, type, dvalue, cc_flag, clevel)  \
+#define copy_string_members_definition(name, type, dvalue, cc_flag)  \
   if (src->_modified[name##Index]) {                                         \
     set->name##Option = os::strdup_check_oom(src->name##Option, mtCompiler); \
   } else {                                                                   \

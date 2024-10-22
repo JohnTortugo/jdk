@@ -71,7 +71,7 @@ static const char* optiontype2name(enum OptionType type) {
 }
 
 static enum OptionType option_types[] = {
-#define enum_of_options(option, name, ctype) OptionType::ctype,
+#define enum_of_options(option, name, ctype, levels) OptionType::ctype,
         COMPILECOMMAND_OPTIONS(enum_of_options)
 #undef enum_of_options
 };
@@ -81,13 +81,29 @@ static enum OptionType option2type(CompileCommandEnum option) {
 }
 
 static const char* option_names[] = {
-#define enum_of_options(option, name, ctype) name,
+#define enum_of_options(option, name, ctype, levels) name,
         COMPILECOMMAND_OPTIONS(enum_of_options)
 #undef enum_of_options
 };
 
 static const char* option2name(CompileCommandEnum option) {
   return option_names[static_cast<int>(option)];
+}
+
+static int option_levels[] = {
+#define enum_of_options(option, name, ctype, levels) levels,
+        COMPILECOMMAND_OPTIONS(enum_of_options)
+#undef enum_of_options
+};
+
+static int option2levels(CompileCommandEnum option) {
+  return option_levels[static_cast<int>(option)];
+}
+
+static bool valid_comp_level(CompileCommandEnum option, int comp_level) {
+  int accepted_levels = option2levels(option);
+  if (comp_level < CompLevel::CompLevel_simple || comp_level > CompLevel::CompLevel_full_optimization) return false;
+  return accepted_levels & (1 << comp_level);
 }
 
 /* Methods to map real type names to OptionType */
@@ -584,7 +600,7 @@ static void print_option(CompileCommandEnum option, const char* name, enum Optio
 static void print_commands() {
   tty->cr();
   tty->print_cr("All available options:");
-#define enum_of_options(option, name, ctype) print_option(CompileCommandEnum::option, name, OptionType::ctype);
+#define enum_of_options(option, name, ctype, levels) print_option(CompileCommandEnum::option, name, OptionType::ctype);
   COMPILECOMMAND_OPTIONS(enum_of_options)
 #undef enum_of_options
   tty->cr();
@@ -725,29 +741,34 @@ static bool parseMemStat(const char* line, uintx& value, int& bytes_read, char* 
   return false;
 }
 
-static void read_comp_level(char* line, int& total_bytes_read, TypedMethodOptionMatcher* matcher) {
-  int bytes_read = 0;
+static bool parse_comp_level_if_present(char* line, int& total_bytes_read, TypedMethodOptionMatcher* matcher, CompileCommandEnum option, char* errorbuf, const int buf_size) {
   int skipped = skip_whitespace(line);
   total_bytes_read += skipped;
 
-  uintx comp_level;
-  bool success = false;
-  success = sscanf(line, "" UINTX_FORMAT "%n", &comp_level, &bytes_read) == 1;
-
-  if (success) {
-    total_bytes_read += bytes_read;
-    line += bytes_read;
-    matcher->set_comp_level(comp_level);
-  }
-}
-
-static void parse_comp_level_if_present(char* line, int& total_bytes_read, TypedMethodOptionMatcher* matcher) {
-  int skipped = skip_whitespace(line);
-  total_bytes_read += skipped;
   if (*line != '\0') {
     skip_comma(line);
-    read_comp_level(line, total_bytes_read, matcher);
+
+    int bytes_read = 0;
+    int skipped = skip_whitespace(line);
+    total_bytes_read += skipped;
+
+    uintx comp_level;
+    bool success = sscanf(line, "" UINTX_FORMAT "%n", &comp_level, &bytes_read) == 1;
+
+    if (success) {
+      total_bytes_read += bytes_read;
+      line += bytes_read;
+      if (valid_comp_level(option, comp_level)) {
+        matcher->set_comp_level(comp_level);
+        return true;
+      } else {
+        jio_snprintf(errorbuf, buf_size, "parse_comp_level: invalid compilation level for this option.");
+        return false;
+      }
+    }
   }
+
+  return true; // means no error
 }
 
 static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
@@ -770,9 +791,10 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
     if (success) {
       total_bytes_read += bytes_read;
       line += bytes_read;
-      parse_comp_level_if_present(line, bytes_read, matcher);
-      register_command(matcher, option, value);
-      return;
+      success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+      if (success) {
+        register_command(matcher, option, value);
+      }
     } else {
       jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
     }
@@ -789,8 +811,10 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
     if (success) {
       total_bytes_read += bytes_read;
       line += bytes_read;
-      parse_comp_level_if_present(line, bytes_read, matcher);
-      register_command(matcher, option, value);
+      success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+      if (success) {
+        register_command(matcher, option, value);
+      }
     } else {
       jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
     }
@@ -800,9 +824,10 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
     if (sscanf(line, "%255[_a-zA-Z0-9]%n", value, &bytes_read) == 1) {
       total_bytes_read += bytes_read;
       line += bytes_read;
-      parse_comp_level_if_present(line, bytes_read, matcher);
-      register_command(matcher, option, (ccstr) value);
-      return;
+      bool success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+      if (success) {
+        register_command(matcher, option, (ccstr) value);
+      }
     } else {
       jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
     }
@@ -852,9 +877,10 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
         assert(false, "Ccstrlist type option missing validator");
       }
 
-      parse_comp_level_if_present(line, bytes_read, matcher);
-      register_command(matcher, option, (ccstr) value);
-      return;
+      bool success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+      if (success) {
+        register_command(matcher, option, (ccstr) value);
+      }
     } else {
       jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
     }
@@ -870,21 +896,26 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
       if (strcasecmp(value, "true") == 0) {
         total_bytes_read += bytes_read;
         line += bytes_read;
-        parse_comp_level_if_present(line, bytes_read, matcher);
-        register_command(matcher, option, true);
-        return;
+        bool success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+        if (success) {
+          register_command(matcher, option, true);
+        }
       } else if (strcasecmp(value, "false") == 0) {
         total_bytes_read += bytes_read;
         line += bytes_read;
-        parse_comp_level_if_present(line, bytes_read, matcher);
-        register_command(matcher, option, false);
-        return;
+        bool success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+        if (success) {
+          register_command(matcher, option, false);
+        }
       } else {
         jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
-        return;
       }
+      return;
     }
-    parse_comp_level_if_present(line, bytes_read, matcher);
+    bool success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+    if (!success) {
+      return;
+    }
     line += bytes_read;
     if (*line == '\0') {
       // Short version of a CompileCommand sets a boolean Option to true
@@ -900,9 +931,10 @@ static void scan_value(enum OptionType type, char* line, int& total_bytes_read,
       jio_snprintf(value, sizeof(value), "%s.%s", buffer[0], buffer[1]);
       total_bytes_read += bytes_read;
       line += bytes_read;
-      parse_comp_level_if_present(line, bytes_read, matcher);
-      register_command(matcher, option, atof(value));
-      return;
+      bool success = parse_comp_level_if_present(line, bytes_read, matcher, option, errorbuf, buf_size);
+      if (success) {
+        register_command(matcher, option, atof(value));
+      }
     } else {
       jio_snprintf(errorbuf, buf_size, "Value cannot be read for option '%s' of type '%s'", ccname, type_str);
     }

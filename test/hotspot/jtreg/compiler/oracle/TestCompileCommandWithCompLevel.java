@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -90,11 +90,8 @@ public class TestCompileCommandWithCompLevel {
     private static final String BOOLEAN_TEMPLATE_EXPECTED_OUTPUT = "<command> com/oracle/Test.test bool <command> = <value> for compilation level <level>";
 
     private static void verifyValidOption(String[] arguments, String[] expected_outputs) throws Exception {
-        ProcessBuilder pb;
-        OutputAnalyzer out;
-
-        pb = ProcessTools.createLimitedTestJavaProcessBuilder(arguments);
-        out = new OutputAnalyzer(pb.start());
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(arguments);
+        OutputAnalyzer out = new OutputAnalyzer(pb.start());
 
         for (String expected_output : expected_outputs) {
             out.shouldContain(expected_output);
