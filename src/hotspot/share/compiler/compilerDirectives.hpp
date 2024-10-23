@@ -35,7 +35,7 @@
 #include "utilities/exceptions.hpp"
 #include "utilities/tribool.hpp"
 
-//      Directives flag name,    type, default value, compile command name, compilation level
+//      Directives flag name,    type, default value, compile command name
 #define compilerdirectives_common_other_flags(cflags)                                                                                                  \
     cflags(Enable,                                  bool,                                   false, Unknown)    \
     cflags(Exclude,                                 bool,                                   false, Unknown)    \
@@ -54,11 +54,9 @@
     cflags(DumpInline,                              bool,                                   false, DumpInline)    \
     cflags(CompilerDirectivesIgnoreCompileCommands, bool, CompilerDirectivesIgnoreCompileCommands, Unknown)    \
     cflags(RepeatCompilation,                       intx,                       RepeatCompilation, RepeatCompilation)
-
 #define compilerdirectives_common_string_flags(cflags)                                                                                                \
   cflags(DisableIntrinsic,                     ccstrlist,                        DisableIntrinsic, DisableIntrinsic)   \
   cflags(ControlIntrinsic,                     ccstrlist,                        ControlIntrinsic, ControlIntrinsic)
-
 #define compilerdirectives_common_flags(cflags) \
   compilerdirectives_common_other_flags(cflags) \
   compilerdirectives_common_string_flags(cflags)
@@ -80,16 +78,16 @@
     cflags(BlockLayoutByFrequency,                  bool,        BlockLayoutByFrequency,         BlockLayoutByFrequency)  \
     cflags(PrintOptoAssembly,                       bool,             PrintOptoAssembly,              PrintOptoAssembly)  \
     cflags(PrintIntrinsics,                         bool,               PrintIntrinsics,                PrintIntrinsics)  \
-    cflags(TraceSpilling,                           bool,                 TraceSpilling,                  TraceSpilling)  \
-    cflags(Vectorize,                               bool,                         false,                      Vectorize)  \
-    cflags(CloneMapDebug,                           bool,                         false,                  CloneMapDebug)  \
-    cflags(IncrementalInlineForceCleanup,           bool, IncrementalInlineForceCleanup,  IncrementalInlineForceCleanup)  \
-    cflags(MaxNodeLimit,                            intx,                  MaxNodeLimit,                   MaxNodeLimit)  \
 NOT_PRODUCT(cflags(TraceOptoPipelining,             bool,           TraceOptoPipelining,            TraceOptoPipelining)) \
 NOT_PRODUCT(cflags(TraceOptoOutput,                 bool,               TraceOptoOutput,                TraceOptoOutput)) \
 NOT_PRODUCT(cflags(TraceEscapeAnalysis,             bool,                         false,            TraceEscapeAnalysis)) \
 NOT_PRODUCT(cflags(PrintIdeal,                      bool,                    PrintIdeal,                     PrintIdeal)) \
-NOT_PRODUCT(cflags(IGVPrintLevel,                   intx,          PrintIdealGraphLevel,                  IGVPrintLevel))
+    cflags(TraceSpilling,                           bool,                 TraceSpilling,                  TraceSpilling)  \
+    cflags(Vectorize,                               bool,                         false,                      Vectorize)  \
+    cflags(CloneMapDebug,                           bool,                         false,                  CloneMapDebug)  \
+NOT_PRODUCT(cflags(IGVPrintLevel,                   intx,          PrintIdealGraphLevel,                  IGVPrintLevel)) \
+    cflags(IncrementalInlineForceCleanup,           bool, IncrementalInlineForceCleanup,  IncrementalInlineForceCleanup)  \
+    cflags(MaxNodeLimit,                            intx,                  MaxNodeLimit,                   MaxNodeLimit)
 
 #define compilerdirectives_c2_string_flags(cflags)                                                                                                      \
 NOT_PRODUCT(cflags(TraceAutoVectorization,     ccstrlist,                            "",         TraceAutoVectorization)) \

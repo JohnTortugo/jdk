@@ -91,7 +91,7 @@ static const char* option2name(CompileCommandEnum option) {
 }
 
 static int option_levels[] = {
-#define enum_of_options(option, name, ctype, levels) levels,
+#define enum_of_options(option, name, ctype, levels) levels > 0 ? (1 << levels) : levels,
         COMPILECOMMAND_OPTIONS(enum_of_options)
 #undef enum_of_options
 };
