@@ -138,9 +138,9 @@ public class TestCompileCommandWithCompLevel {
             new CommandDescription("IncrementalInlineForceCleanup", "bool", booleans, invalid_bools, full_optimization_level),
             new CommandDescription("MaxNodeLimit", "intx", valid_max_node_limits, invalid_max_node_limits, full_optimization_level),
             new CommandDescription("TraceEscapeAnalysis", "bool", booleans, invalid_bools, full_optimization_level),
-            new CommandDescription("PrintIdeal", "bool", booleans, invalid_bools, full_optimization_level)
+            new CommandDescription("PrintIdeal", "bool", booleans, invalid_bools, full_optimization_level),
 //            new CommandDescription("PrintIdealPhase", "Ccstrlist", valid_phases, invalid_phases, full_optimization_level),
-//            new CommandDescription("IGVPrintLevel", "intx", valid_igv_levels, invalid_igv_levels, full_optimization_level),
+//            new CommandDescription("IGVPrintLevel", "intx", valid_igv_levels, invalid_igv_levels, full_optimization_level)
 //            new CommandDescription("TraceAutoVectorization", "Ccstrlist", valid_auto_vec_inputs, invalid_auto_vec_inputs, full_optimization_level)
         );
 
