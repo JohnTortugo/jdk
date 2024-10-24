@@ -231,7 +231,7 @@ bool MethodMatcher::match(int comp_level_param) const {
     return true;
   }
 
-  return comp_level_param == _comp_level;
+  return _comp_level & (1 << comp_level_param);
 }
 
 static MethodMatcher::Mode check_mode(char name[], const char*& error_msg) {

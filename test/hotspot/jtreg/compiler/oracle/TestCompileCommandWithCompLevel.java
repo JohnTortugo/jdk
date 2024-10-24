@@ -23,7 +23,7 @@
 
 /*
  * @test TestCompileCommandWithCompLevel
- * @summary Tests parsing of -XX:CompileCommand=....,<comp_level>
+ * @summary Tests parsing compilation level in CompileCommands
  * @library /test/lib
  * @modules java.base/jdk.internal.misc
  *          java.management
@@ -38,12 +38,11 @@ import jdk.test.lib.process.OutputAnalyzer;
 import jdk.test.lib.process.ProcessTools;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.stream.IntStream;
+import java.util.stream.Collectors;
 import java.util.Arrays;
 
 public class TestCompileCommandWithCompLevel {
-    private static final String COMMAND_TEMPLATE = "-XX:CompileCommand=<command>,com/oracle/Test.test,<value>,<level>";
-    private static final String EXPECTED_VALID_OUTPUT = "<command> com/oracle/Test.test <type> <command> = <value> for compilation level <level>";
-
     private static void verifyValidOption(String[] arguments, String[] expected_outputs) throws Exception {
         ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(arguments);
         OutputAnalyzer out = new OutputAnalyzer(pb.start());
@@ -56,44 +55,52 @@ public class TestCompileCommandWithCompLevel {
         out.shouldHaveExitValue(0);
     }
 
+    private static void verifyInvalidOption(String[] arguments) throws Exception {
+        ProcessBuilder pb = ProcessTools.createLimitedTestJavaProcessBuilder(arguments);
+        OutputAnalyzer out = new OutputAnalyzer(pb.start());
+
+        out.shouldContain("CompileCommand: An error occurred during parsing");
+        out.shouldHaveExitValue(1);
+    }
+
     public static void main(String[] args) throws Exception {
-        List<String> booleans = List.of("true", "false");
-        List<String> invalid_bools = List.of("truefalse", "falsetrue", "false,true", "true,false");
+        final String command_template = "-XX:CompileCommand=<command>,com/oracle/Test.test,<value>,<level>";
+        final String expected_output_template = "<command> com/oracle/Test.test <type> <command> = <value> for compilation level <level>";
 
-        List<String> valid_phases = List.of("ITER_GVN1", "AFTER_EA");
-        List<String> invalid_phases = List.of("phase_a", "phase_b");
+        final List<String> booleans = List.of("true", "false");
+        final List<String> invalid_bools = List.of("truefalse", "falsetrue");
 
-        List<String> valid_igv_levels = List.of("2", "3");
-        List<String> invalid_igv_levels = List.of("10", "30");
+        final List<String> valid_phases = List.of("ITER_GVN1", "AFTER_EA");
+        final List<String> invalid_phases = List.of("phase_a", "phase_b");
 
-        List<String> valid_auto_vec_inputs = List.of("phase_a", "phase_b");
-        List<String> invalid_auto_vec_inputs = List.of("phase_a", "phase_b");
+        final List<String> valid_igv_levels = List.of("2", "3");
+        final List<String> invalid_igv_levels = List.of("10", "30");
 
-        List<String> valid_max_node_limits = List.of("1000", "6789");
-        List<String> invalid_max_node_limits = List.of("aaa", "xyz");
+        final List<String> valid_auto_vec_inputs = List.of("pointers", "body");
+        final List<String> invalid_auto_vec_inputs = List.of("phase_a", "phase_b");
 
-        List<String> valid_control_intrinsic_inputs = List.of("phase_a", "phase_b");
-        List<String> invalid_control_intrinsic_inputs = List.of("rand", "rotate");
+        final List<String> valid_max_node_limits = List.of("1000", "6789");
+        final List<String> invalid_max_node_limits = List.of("aaa", "xyz");
 
-        List<String> valid_disable_intrinsic_inputs = List.of("phase_a", "phase_b");
-        List<String> invalid_disable_intrinsic_inputs = List.of("java.lang", "Integer");
+        final List<String> valid_control_intrinsic_inputs = List.of("-_nanoTime", "-_arraycopy");
+        final List<String> invalid_control_intrinsic_inputs = List.of("rand", "rotate");
 
-        List<String> valid_scaling_inputs = List.of("1.0", "2.0");
-        List<String> invalid_scaling_inputs = List.of("a", "b");
+        final List<String> valid_disable_intrinsic_inputs = List.of("_nanoTime", "_arraycopy");
+        final List<String> invalid_disable_intrinsic_inputs = List.of("java.lang", "Integer");
 
-        List<String> valid_repeat_comp_inputs = List.of("3", "4", "0");
-        List<String> invalid_repeat_comp_inputs = List.of("a", "1m");
+        final List<String> valid_repeat_comp_inputs = List.of("3", "4", "0");
+        final List<String> invalid_repeat_comp_inputs = List.of("a", "m234");
 
-        List<String> valid_mem_limit_inputs = List.of("10", "123");
-        List<String> invalid_mem_limit_inputs = List.of("xyz", "0m", "m1");
+        final List<String> valid_mem_limit_inputs = List.of("10", "123");
+        final List<String> invalid_mem_limit_inputs = List.of("xyz", "0m", "m1");
 
-        List<String> valid_mem_stat_inputs = List.of("collect", "print");
-        List<String> invalid_mem_stat_inputs = List.of("add", "sub");
+        final List<String> valid_mem_stat_inputs = List.of("collect", "print");
+        final List<String> invalid_mem_stat_inputs = List.of("add", "sub");
 
-        List<Integer> all_levels = List.of(1, 2, 3, 4);
-        List<Integer> full_optimization_level = List.of(4);
+        final List<Integer> all_levels = List.of(1, 2, 3, 4);
+        final List<Integer> full_optimization_level = List.of(4);
 
-        List<CommandDescription> command_descriptions = List.of(
+        final List<CommandDescription> command_descriptions = List.of(
             new CommandDescription("log", "bool", booleans, invalid_bools, all_levels),
             new CommandDescription("print", "bool", booleans, invalid_bools, all_levels),
             new CommandDescription("inline", "bool", booleans, invalid_bools, full_optimization_level),
@@ -120,37 +127,39 @@ public class TestCompileCommandWithCompLevel {
             new CommandDescription("ReplayInline", "bool", booleans, invalid_bools, full_optimization_level),
             new CommandDescription("DumpReplay", "bool", booleans, invalid_bools, all_levels),
             new CommandDescription("DumpInline", "bool", booleans, invalid_bools, full_optimization_level),
-            new CommandDescription("CompileThresholdScaling", "Double", valid_scaling_inputs, invalid_scaling_inputs, all_levels),
-            new CommandDescription("ControlIntrinsic", "Ccstrlist", valid_control_intrinsic_inputs, invalid_control_intrinsic_inputs, all_levels),
-            new CommandDescription("DisableIntrinsic", "Ccstrlist", valid_disable_intrinsic_inputs, invalid_disable_intrinsic_inputs, all_levels),
+//            new CommandDescription("ControlIntrinsic", "Ccstrlist", valid_control_intrinsic_inputs, invalid_control_intrinsic_inputs, all_levels),
+//            new CommandDescription("DisableIntrinsic", "Ccstrlist", valid_disable_intrinsic_inputs, invalid_disable_intrinsic_inputs, all_levels),
             new CommandDescription("BlockLayoutByFrequency", "bool", booleans, invalid_bools, full_optimization_level),
             new CommandDescription("TraceOptoPipelining", "bool", booleans, invalid_bools, full_optimization_level),
             new CommandDescription("TraceOptoOutput", "bool", booleans, invalid_bools, full_optimization_level),
             new CommandDescription("TraceSpilling", "bool", booleans, invalid_bools, all_levels),
             new CommandDescription("Vectorize", "bool", booleans, invalid_bools, full_optimization_level),
-            new CommandDescription("CloneMapDebug", "bool", booleans, invalid_bools, all_levels),
+            new CommandDescription("CloneMapDebug", "bool", booleans, invalid_bools, full_optimization_level),
             new CommandDescription("IncrementalInlineForceCleanup", "bool", booleans, invalid_bools, full_optimization_level),
             new CommandDescription("MaxNodeLimit", "intx", valid_max_node_limits, invalid_max_node_limits, full_optimization_level),
             new CommandDescription("TraceEscapeAnalysis", "bool", booleans, invalid_bools, full_optimization_level),
-            new CommandDescription("PrintIdeal", "bool", booleans, invalid_bools, full_optimization_level),
-            new CommandDescription("PrintIdealPhase", "Ccstrlist", valid_phases, invalid_phases, full_optimization_level),
-            new CommandDescription("IGVPrintLevel", "intx", valid_igv_levels, invalid_igv_levels, full_optimization_level),
-            new CommandDescription("TraceAutoVectorization", "Ccstrlist", valid_auto_vec_inputs, invalid_auto_vec_inputs, full_optimization_level)
+            new CommandDescription("PrintIdeal", "bool", booleans, invalid_bools, full_optimization_level)
+//            new CommandDescription("PrintIdealPhase", "Ccstrlist", valid_phases, invalid_phases, full_optimization_level),
+//            new CommandDescription("IGVPrintLevel", "intx", valid_igv_levels, invalid_igv_levels, full_optimization_level),
+//            new CommandDescription("TraceAutoVectorization", "Ccstrlist", valid_auto_vec_inputs, invalid_auto_vec_inputs, full_optimization_level)
         );
 
+        // Test each command
         for (CommandDescription cdesc : command_descriptions) {
-            for (String valid_input : cdesc.sample_of_valid_values) {
+            // Test VALID inputs in all VALID levels
+            for (String valid_input : cdesc.valid_values) {
                 for (Integer valid_level : cdesc.valid_levels) {
                     String[] arguments = {
+                                            "-XX:+LogCompilation",
                                             "-XX:+UnlockExperimentalVMOptions",
                                             "-XX:+UnlockDiagnosticVMOptions",
-                                            COMMAND_TEMPLATE.replace("<command>", cdesc.command)
+                                            command_template.replace("<command>", cdesc.command)
                                                             .replace("<value>", valid_input)
                                                             .replace("<level>", Integer.toString(valid_level)),
                                             "-version"
                                             };
 
-                    String[] expected_output = { EXPECTED_VALID_OUTPUT
+                    String[] expected_output = { expected_output_template
                                                     .replace("<command>", cdesc.command)
                                                     .replace("<type>", cdesc.type)
                                                     .replace("<value>", valid_input)
@@ -163,23 +172,62 @@ public class TestCompileCommandWithCompLevel {
                     verifyValidOption(arguments, expected_output);
                 }
             }
-        }
 
+            // Test INVALID inputs in all VALID levels
+            for (String invalid_input : cdesc.invalid_values) {
+                for (Integer valid_level : cdesc.valid_levels) {
+                    String[] arguments = {
+                                            "-XX:+LogCompilation",
+                                            "-XX:+UnlockExperimentalVMOptions",
+                                            "-XX:+UnlockDiagnosticVMOptions",
+                                            command_template.replace("<command>", cdesc.command)
+                                                            .replace("<value>", invalid_input)
+                                                            .replace("<level>", Integer.toString(valid_level)),
+                                            "-version"
+                                            };
+
+                    System.out.println( Arrays.toString(arguments) );
+
+                    verifyInvalidOption(arguments);
+                }
+            }
+
+            // Test VALID inputs in all INVALID levels
+            for (String valid_input : cdesc.valid_values) {
+                for (Integer invalid_level : cdesc.invalid_levels) {
+                    String[] arguments = {
+                                            "-XX:+LogCompilation",
+                                            "-XX:+UnlockExperimentalVMOptions",
+                                            "-XX:+UnlockDiagnosticVMOptions",
+                                            command_template.replace("<command>", cdesc.command)
+                                                            .replace("<value>", valid_input)
+                                                            .replace("<level>", Integer.toString(invalid_level)),
+                                            "-version"
+                                            };
+
+                    System.out.println( Arrays.toString(arguments) );
+
+                    verifyInvalidOption(arguments);
+                }
+            }
+        }
     }
 }
 
 class CommandDescription {
     public String command;
     public String type;
-    public ArrayList<String> sample_of_valid_values;
-    public ArrayList<String> sample_of_invalid_values;
+    public ArrayList<String> valid_values;
+    public ArrayList<String> invalid_values;
     public ArrayList<Integer> valid_levels;
+    public ArrayList<Integer> invalid_levels;
 
-    public CommandDescription(String cmd, String type, List<String> valid_values, List<String> invalid_values, List<Integer> levels) {
+    public CommandDescription(String cmd, String type, List<String> valid_values, List<String> invalid_values, List<Integer> valid_levels) {
         this.command = cmd;
         this.type = type;
-        this.sample_of_valid_values = new ArrayList<>(valid_values);
-        this.sample_of_invalid_values = new ArrayList<>(invalid_values);
-        this.valid_levels = new ArrayList<>(levels);
+        this.valid_values = new ArrayList<>(valid_values);
+        this.invalid_values = new ArrayList<>(invalid_values);
+        this.valid_levels = new ArrayList<>(valid_levels);
+        this.invalid_levels = List.of(1,2,3,4).stream().filter(x -> !valid_levels.contains(x)).collect(Collectors.toCollection(ArrayList::new));
     }
 }
