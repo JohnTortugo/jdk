@@ -23,7 +23,7 @@
 # questions.
 #
 
-name: 'OpenJDK GHA Sanity Checks'
+name: 'Tortugo Run Moat Tests'
 
 on:
   workflow_dispatch:
@@ -242,7 +242,6 @@ jobs:
       - select
     uses: ./.github/workflows/build-cross-compile.yml
     with:
-      branch: ${{ github.event.inputs.branch }}
       gcc-major-version: '10'
       configure-arguments: ${{ github.event.inputs.configure-arguments }}
       make-arguments: ${{ github.event.inputs.make-arguments }}
