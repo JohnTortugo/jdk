@@ -102,7 +102,6 @@ void CardTableBarrierSetAssembler::store_check_part1(MacroAssembler* masm, Regis
   CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
   CardTable* ct = ctbs->card_table();
 
-
   // Load card table base address.
 
   /* Performance note.
