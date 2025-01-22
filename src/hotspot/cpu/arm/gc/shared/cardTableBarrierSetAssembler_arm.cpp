@@ -59,10 +59,6 @@ void CardTableBarrierSetAssembler::gen_write_ref_array_post_barrier(MacroAssembl
   __ logical_shift_right(count, count, CardTable::card_shift());
   __ sub(count, count, addr); // nb of cards
 
-  BarrierSet* bs = BarrierSet::barrier_set();
-  CardTableBarrierSet* ctbs = barrier_set_cast<CardTableBarrierSet>(bs);
-  CardTable* ct = ctbs->card_table();
-
   // warning: Rthread has not been preserved
   __ mov_address(tmp, (address) ct->byte_map_base());
   __ add(addr,tmp, addr);
@@ -110,9 +106,12 @@ void CardTableBarrierSetAssembler::store_check_part1(MacroAssembler* masm, Regis
   // Load card table base address.
 
   /* Performance note.
+
      There is an alternative way of loading card table base address
      from thread descriptor, which may look more efficient:
+
      ldr(card_table_base, Address(Rthread, JavaThread::card_table_base_offset()));
+
      However, performance measurements of micro benchmarks and specJVM98
      showed that loading of card table base from thread descriptor is
      7-18% slower compared to loading of literal embedded into the code.
