@@ -795,7 +795,8 @@ void ShenandoahBarrierSetAssembler::gen_write_ref_array_post_barrier(MacroAssemb
   __ srdi(addr, addr, CardTable::card_shift());
   __ srdi(count, count, CardTable::card_shift());
   __ subf(count, addr, count);
-  __ add_const_optimized(addr, addr, (address)ct->byte_map_base(), R0);
+  __ ld(R0, in_bytes(ShenandoahThreadLocalData::card_table_offset()), R16_thread);
+  __ add(addr, addr, R0);
   __ addi(count, count, 1);
   __ li(R0, 0);
   __ mtctr(count);
