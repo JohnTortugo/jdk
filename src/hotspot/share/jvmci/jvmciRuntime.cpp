@@ -60,6 +60,9 @@
 #if INCLUDE_G1GC
 #include "gc/g1/g1BarrierSetRuntime.hpp"
 #endif // INCLUDE_G1GC
+#if INCLUDE_SHENANDOAHGC
+#include "gc/shenandoah/shenandoahRuntime.hpp"
+#endif // INCLUDE_SHENANDOAHGC
 
 // Simple helper to see if the caller of a runtime stub which
 // entered the VM has been deoptimized
@@ -594,6 +597,16 @@ void JVMCIRuntime::write_barrier_post(JavaThread* thread, volatile CardValue* ca
 }
 
 #endif // INCLUDE_G1GC
+
+#if INCLUDE_SHENANDOAHGC
+void JVMCIRuntime::shenandoah_lrb_strong(oopDesc* src, oop* load_addr) {
+  ShenandoahRuntime::load_reference_barrier_strong(src, load_addr);
+}
+
+void JVMCIRuntime::shenandoah_lrb_strong_narrow(oopDesc* src, narrowOop* load_addr) {
+  ShenandoahRuntime::load_reference_barrier_strong_narrow(src, load_addr);
+}
+#endif // INCLUDE_SHENANDOAHGC
 
 JRT_LEAF(jboolean, JVMCIRuntime::validate_object(JavaThread* thread, oopDesc* parent, oopDesc* child))
   bool ret = true;

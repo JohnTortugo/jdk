@@ -277,6 +277,10 @@ public:
     return satb_mark_queue_offset() + SATBMarkQueue::byte_offset_of_buf();
   }
 
+  static ByteSize satb_mark_queue_active_offset() {
+    return satb_mark_queue_offset() + SATBMarkQueue::byte_offset_of_active();
+  }
+
   static ByteSize gc_state_offset() {
     return Thread::gc_data_offset() + byte_offset_of(ShenandoahThreadLocalData, _gc_state);
   }

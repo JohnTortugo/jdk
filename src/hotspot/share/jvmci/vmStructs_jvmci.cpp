@@ -53,6 +53,10 @@
 #include "gc/z/zBarrierSetRuntime.hpp"
 #include "gc/z/zThreadLocalData.hpp"
 #endif
+#if INCLUDE_SHENANDOAHGC
+#include "gc/shenandoah/shenandoahThreadLocalData.hpp"
+#include "gc/shenandoah/shenandoahRuntime.hpp"
+#endif
 
 #define VM_STRUCTS(nonstatic_field, static_field, unchecked_nonstatic_field, volatile_nonstatic_field) \
   static_field(CompilerToVM::Data,             oopDesc_klass_offset_in_bytes,          int)                                          \
@@ -880,6 +884,8 @@
   G1GC_ONLY(declare_function(JVMCIRuntime::write_barrier_pre))            \
   G1GC_ONLY(declare_function(JVMCIRuntime::write_barrier_post))           \
   declare_function(JVMCIRuntime::validate_object)                         \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_strong))           \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_strong_narrow))    \
                                                                           \
   declare_function(JVMCIRuntime::test_deoptimize_call_int)
 
@@ -898,6 +904,17 @@
   declare_constant_with_value("G1ThreadLocalData::dirty_card_queue_buffer_offset", in_bytes(G1ThreadLocalData::dirty_card_queue_buffer_offset()))
 
 #endif // INCLUDE_G1GC
+
+
+#if INCLUDE_SHENANDOAHGC
+
+#define VM_INT_CONSTANTS_JVMCI_SHENANDOAH(declare_constant, declare_constant_with_value, declare_preprocessor_constant) \
+  declare_constant_with_value("ShenandoahThreadLocalData::satb_mark_queue_active_offset", in_bytes(ShenandoahThreadLocalData::satb_mark_queue_active_offset())) \
+  declare_constant_with_value("ShenandoahThreadLocalData::satb_mark_queue_index_offset", in_bytes(ShenandoahThreadLocalData::satb_mark_queue_index_offset())) \
+  declare_constant_with_value("ShenandoahThreadLocalData::satb_mark_queue_buffer_offset", in_bytes(ShenandoahThreadLocalData::satb_mark_queue_buffer_offset())) \
+  declare_constant_with_value("ShenandoahThreadLocalData::gc_state_offset", in_bytes(ShenandoahThreadLocalData::gc_state_offset())) \
+
+#endif
 
 
 #if INCLUDE_ZGC
@@ -1045,6 +1062,11 @@ VMIntConstantEntry JVMCIVMStructs::localHotSpotVMIntConstants[] = {
 
 #if INCLUDE_G1GC
   VM_INT_CONSTANTS_JVMCI_G1GC(GENERATE_VM_INT_CONSTANT_ENTRY,
+                              GENERATE_VM_INT_CONSTANT_WITH_VALUE_ENTRY,
+                              GENERATE_PREPROCESSOR_VM_INT_CONSTANT_ENTRY)
+#endif
+#if INCLUDE_SHENANDOAHGC
+  VM_INT_CONSTANTS_JVMCI_SHENANDOAH(GENERATE_VM_INT_CONSTANT_ENTRY,
                               GENERATE_VM_INT_CONSTANT_WITH_VALUE_ENTRY,
                               GENERATE_PREPROCESSOR_VM_INT_CONSTANT_ENTRY)
 #endif

@@ -320,7 +320,7 @@ JVMCIObjectArray CompilerToVM::initialize_intrinsics(JVMCI_TRAPS) {
   return vmIntrinsics;
 }
 
-#define PREDEFINED_CONFIG_FLAGS(do_bool_flag, do_int_flag, do_intx_flag, do_uintx_flag) \
+#define PREDEFINED_CONFIG_FLAGS(do_bool_flag, do_int_flag, do_intx_flag, do_uintx_flag, do_str_flag) \
   do_int_flag(AllocateInstancePrefetchLines)                               \
   do_int_flag(AllocatePrefetchDistance)                                    \
   do_intx_flag(AllocatePrefetchInstr)                                      \
@@ -363,12 +363,16 @@ JVMCIObjectArray CompilerToVM::initialize_intrinsics(JVMCI_TRAPS) {
   do_bool_flag(UseParallelGC)                                              \
   do_bool_flag(UseSerialGC)                                                \
   do_bool_flag(UseZGC)                                                     \
+  do_bool_flag(UseShenandoahGC)                                                     \
   do_bool_flag(UseEpsilonGC)                                               \
   COMPILER2_PRESENT(do_bool_flag(UseMontgomeryMultiplyIntrinsic))          \
   COMPILER2_PRESENT(do_bool_flag(UseMontgomerySquareIntrinsic))            \
   COMPILER2_PRESENT(do_bool_flag(UseMulAddIntrinsic))                      \
   COMPILER2_PRESENT(do_bool_flag(UseMultiplyToLenIntrinsic))               \
-  do_bool_flag(UsePopCountInstruction)                                     \
+  do_str_flag(ShenandoahGCMode)                                     \
+  do_bool_flag(ShenandoahLoadRefBarrier)                                     \
+  do_bool_flag(ShenandoahSATBBarrier)                                     \
+  do_bool_flag(ShenandoahCASBarrier)                                     \
   do_bool_flag(UseSHA1Intrinsics)                                          \
   do_bool_flag(UseSHA256Intrinsics)                                        \
   do_bool_flag(UseSHA512Intrinsics)                                        \
@@ -521,12 +525,13 @@ jobjectArray readConfiguration0(JNIEnv *env, JVMCI_TRAPS) {
 #define ADD_INT_FLAG(name)   ADD_FLAG(int, name, BOXED_LONG)
 #define ADD_INTX_FLAG(name)  ADD_FLAG(intx, name, BOXED_LONG)
 #define ADD_UINTX_FLAG(name) ADD_FLAG(uintx, name, BOXED_LONG)
+#define ADD_STR_FLAG(name)   ADD_FLAG(string, name, CSTRING_TO_JSTRING)
 
-  len = 0 + PREDEFINED_CONFIG_FLAGS(COUNT_FLAG, COUNT_FLAG, COUNT_FLAG, COUNT_FLAG);
+  len = 0 + PREDEFINED_CONFIG_FLAGS(COUNT_FLAG, COUNT_FLAG, COUNT_FLAG, COUNT_FLAG, COUNT_FLAG);
   JVMCIObjectArray vmFlags = JVMCIENV->new_VMFlag_array(len, JVMCI_CHECK_NULL);
   int i = 0;
   JVMCIObject value;
-  PREDEFINED_CONFIG_FLAGS(ADD_BOOL_FLAG, ADD_INT_FLAG, ADD_INTX_FLAG, ADD_UINTX_FLAG)
+  PREDEFINED_CONFIG_FLAGS(ADD_BOOL_FLAG, ADD_INT_FLAG, ADD_INTX_FLAG, ADD_UINTX_FLAG, ADD_STR_FLAG)
 
   JVMCIObjectArray vmIntrinsics = CompilerToVM::initialize_intrinsics(JVMCI_CHECK_NULL);
 
