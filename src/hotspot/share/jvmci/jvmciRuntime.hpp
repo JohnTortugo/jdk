@@ -543,6 +543,10 @@ class JVMCIRuntime: public CHeapObj<mtJVMCI> {
 #if INCLUDE_SHENANDOAHGC
   static void shenandoah_lrb_strong(oopDesc* src, oop* load_addr);
   static void shenandoah_lrb_strong_narrow(oopDesc* src, narrowOop* load_addr);
+  static void shenandoah_lrb_weak(oopDesc* src, oop* load_addr);
+  static void shenandoah_lrb_weak_narrow(oopDesc* src, narrowOop* load_addr);
+  static void shenandoah_lrb_phantom(oopDesc* src, oop* load_addr);
+  static void shenandoah_lrb_phantom_narrow(oopDesc* src, narrowOop* load_addr);
 #endif
   static jboolean validate_object(JavaThread* thread, oopDesc* parent, oopDesc* child);
 

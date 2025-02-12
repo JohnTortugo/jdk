@@ -86,6 +86,9 @@ address CompilerToVM::Data::ZPointerVectorLoadBadMask_address;
 address CompilerToVM::Data::ZPointerVectorStoreBadMask_address;
 address CompilerToVM::Data::ZPointerVectorStoreGoodMask_address;
 
+address CompilerToVM::Data::shenandoah_in_cset_fast_test_addr;
+int CompilerToVM::Data::shenandoah_region_size_bytes_shift;
+
 bool CompilerToVM::Data::continuations_enabled;
 
 #ifdef AARCH64
@@ -178,6 +181,13 @@ void CompilerToVM::Data::initialize(JVMCI_TRAPS) {
     ZPointerVectorLoadBadMask_address   = (address) &ZPointerVectorLoadBadMask;
     ZPointerVectorStoreBadMask_address  = (address) &ZPointerVectorStoreBadMask;
     ZPointerVectorStoreGoodMask_address = (address) &ZPointerVectorStoreGoodMask;
+  }
+#endif
+
+#if INCLUDE_SHENANDOAHGC
+  if (UseShenandoahGC) {
+    shenandoah_in_cset_fast_test_addr = (address) ShenandoahHeap::in_cset_fast_test_addr();
+    shenandoah_region_size_bytes_shift = ShenandoahHeapRegion::region_size_bytes_shift_jint();
   }
 #endif
 
@@ -525,7 +535,7 @@ jobjectArray readConfiguration0(JNIEnv *env, JVMCI_TRAPS) {
 #define ADD_INT_FLAG(name)   ADD_FLAG(int, name, BOXED_LONG)
 #define ADD_INTX_FLAG(name)  ADD_FLAG(intx, name, BOXED_LONG)
 #define ADD_UINTX_FLAG(name) ADD_FLAG(uintx, name, BOXED_LONG)
-#define ADD_STR_FLAG(name)   ADD_FLAG(string, name, CSTRING_TO_JSTRING)
+#define ADD_STR_FLAG(name)   ADD_FLAG(ccstr, name, CSTRING_TO_JSTRING)
 
   len = 0 + PREDEFINED_CONFIG_FLAGS(COUNT_FLAG, COUNT_FLAG, COUNT_FLAG, COUNT_FLAG, COUNT_FLAG);
   JVMCIObjectArray vmFlags = JVMCIENV->new_VMFlag_array(len, JVMCI_CHECK_NULL);

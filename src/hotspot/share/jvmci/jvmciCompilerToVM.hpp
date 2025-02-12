@@ -76,6 +76,9 @@ class CompilerToVM {
     static address ZPointerVectorStoreBadMask_address;
     static address ZPointerVectorStoreGoodMask_address;
 
+    static address shenandoah_in_cset_fast_test_addr;
+    static int shenandoah_region_size_bytes_shift;
+
     static bool continuations_enabled;
 
     static size_t ThreadLocalAllocBuffer_alignment_reserve;

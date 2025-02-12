@@ -56,6 +56,7 @@
 #if INCLUDE_SHENANDOAHGC
 #include "gc/shenandoah/shenandoahThreadLocalData.hpp"
 #include "gc/shenandoah/shenandoahRuntime.hpp"
+#include "gc/shenandoah/shenandoahHeapRegion.hpp"
 #endif
 
 #define VM_STRUCTS(nonstatic_field, static_field, unchecked_nonstatic_field, volatile_nonstatic_field) \
@@ -96,6 +97,9 @@
   static_field(CompilerToVM::Data,             ZPointerVectorLoadBadMask_address, address)                                           \
   static_field(CompilerToVM::Data,             ZPointerVectorStoreBadMask_address, address)                                          \
   static_field(CompilerToVM::Data,             ZPointerVectorStoreGoodMask_address, address)                                         \
+                                                                                                                                     \
+  static_field(CompilerToVM::Data,             shenandoah_in_cset_fast_test_addr, address)                                           \
+  static_field(CompilerToVM::Data,             shenandoah_region_size_bytes_shift, jint)                                             \
                                                                                                                                      \
   static_field(CompilerToVM::Data,             continuations_enabled, bool)                                                          \
                                                                                                                                      \
@@ -884,9 +888,12 @@
   G1GC_ONLY(declare_function(JVMCIRuntime::write_barrier_pre))            \
   G1GC_ONLY(declare_function(JVMCIRuntime::write_barrier_post))           \
   declare_function(JVMCIRuntime::validate_object)                         \
-  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_strong))           \
-  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_strong_narrow))    \
-                                                                          \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_strong))                  \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_strong_narrow))           \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_weak))                    \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_weak_narrow))             \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_phantom))                 \
+  SHENANDOAHGC_ONLY(declare_function(JVMCIRuntime::shenandoah_lrb_phantom_narrow))          \
   declare_function(JVMCIRuntime::test_deoptimize_call_int)
 
 
@@ -913,6 +920,7 @@
   declare_constant_with_value("ShenandoahThreadLocalData::satb_mark_queue_index_offset", in_bytes(ShenandoahThreadLocalData::satb_mark_queue_index_offset())) \
   declare_constant_with_value("ShenandoahThreadLocalData::satb_mark_queue_buffer_offset", in_bytes(ShenandoahThreadLocalData::satb_mark_queue_buffer_offset())) \
   declare_constant_with_value("ShenandoahThreadLocalData::gc_state_offset", in_bytes(ShenandoahThreadLocalData::gc_state_offset())) \
+  declare_constant_with_value("ShenandoahHeapRegion::region_size_bytes_shift_jint", ShenandoahHeapRegion::region_size_bytes_shift_jint())
 
 #endif
 

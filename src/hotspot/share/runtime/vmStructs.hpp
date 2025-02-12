@@ -277,10 +277,13 @@ private:
 //
 
 #define GENERATE_VM_LONG_CONSTANT_ENTRY(name) \
-  { QUOTE(name), name },
+  { QUOTE(name), (uint64_t)name },
+
+#define GENERATE_VM_LONG_CONSTANT_WITH_VALUE_ENTRY(name, value) \
+ { (name), (uint64_t)value },
 
 #define GENERATE_PREPROCESSOR_VM_LONG_CONSTANT_ENTRY(name, value) \
-  { name, value },
+  { name, (uint64_t)value },
 
 // This macro generates the sentinel value indicating the end of the list
 #define GENERATE_VM_LONG_CONSTANT_LAST_ENTRY() \

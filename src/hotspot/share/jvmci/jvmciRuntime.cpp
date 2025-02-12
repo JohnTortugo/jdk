@@ -606,6 +606,22 @@ void JVMCIRuntime::shenandoah_lrb_strong(oopDesc* src, oop* load_addr) {
 void JVMCIRuntime::shenandoah_lrb_strong_narrow(oopDesc* src, narrowOop* load_addr) {
   ShenandoahRuntime::load_reference_barrier_strong_narrow(src, load_addr);
 }
+
+void JVMCIRuntime::shenandoah_lrb_weak(oopDesc* src, oop* load_addr) {
+  ShenandoahRuntime::load_reference_barrier_weak(src, load_addr);
+}
+
+void JVMCIRuntime::shenandoah_lrb_weak_narrow(oopDesc* src, narrowOop* load_addr) {
+  ShenandoahRuntime::load_reference_barrier_weak_narrow(src, load_addr);
+}
+
+void JVMCIRuntime::shenandoah_lrb_phantom(oopDesc* src, oop* load_addr) {
+  ShenandoahRuntime::load_reference_barrier_phantom(src, load_addr);
+}
+
+void JVMCIRuntime::shenandoah_lrb_phantom_narrow(oopDesc* src, narrowOop* load_addr) {
+  ShenandoahRuntime::load_reference_barrier_phantom_narrow(src, load_addr);
+}
 #endif // INCLUDE_SHENANDOAHGC
 
 JRT_LEAF(jboolean, JVMCIRuntime::validate_object(JavaThread* thread, oopDesc* parent, oopDesc* child))
