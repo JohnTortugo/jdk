@@ -28,7 +28,7 @@
  *          a reducible Phi becomes irreducible after the last of
  *          its SR inputs is flagged as NSR.
  * @run main/othervm -XX:CompileCommand=compileonly,*TestReduceAllocationAndSetTypeTwice*::*
- *                   -Xbatch
+ *                   -Xcomp
  *                   compiler.escapeAnalysis.TestReduceAllocationAndSetTypeTwice
  *
  * @run main compiler.escapeAnalysis.TestReduceAllocationAndSetTypeTwice
