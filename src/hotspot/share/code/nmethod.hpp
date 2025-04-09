@@ -173,8 +173,10 @@ class nmethod : public CodeBlob {
   // Used to track in which deoptimize handshake this method will be deoptimized.
   uint64_t  _deoptimization_generation;
 
+public:
   uint64_t  _gc_epoch;
 
+private:
   Method*   _method;
 
   // To reduce header size union fields which usages do not overlap.

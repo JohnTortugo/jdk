@@ -2124,9 +2124,11 @@ void nmethod::purge(bool unregister_nmethod) {
   // completely deallocate this method
   Events::log_nmethod_flush(Thread::current(), "flushing %s nmethod " INTPTR_FORMAT, is_osr_method() ? "osr" : "", p2i(this));
   log_debug(codecache)("*flushing %s nmethod %3d/" INTPTR_FORMAT ". Live blobs:" UINT32_FORMAT
-                       "/Free CodeCache:%zuKb",
+                       "/Free CodeCache:%zuKb | %s is_cold=%d gc_epoch=%lu",
                        is_osr_method() ? "osr" : "",_compile_id, p2i(this), CodeCache::blob_count(),
-                       CodeCache::unallocated_capacity(CodeCache::get_code_blob_type(this))/1024);
+                       CodeCache::unallocated_capacity(CodeCache::get_code_blob_type(this))/1024,
+                       _method->name()->as_utf8(), is_cold(), _gc_epoch
+                      );
 
   // We need to deallocate any ExceptionCache data.
   // Note that we do not need to grab the nmethod lock for this, it

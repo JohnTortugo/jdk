@@ -859,6 +859,34 @@ WB_ENTRY(jint, WB_DeoptimizeMethod(JNIEnv* env, jobject o, jobject method, jbool
   return result;
 WB_END
 
+WB_ENTRY(void, WB_evictNmethod(JNIEnv* env, jobject o, jobject method))
+  jmethodID jmid = reflected_method_to_jmid(thread, env, method);
+  MutexLocker mu(Compile_lock);
+  methodHandle mh(THREAD, Method::checked_resolve_jmethod_id(jmid));
+  nmethod* code = mh->code();
+  if (code == nullptr) {
+    return ;
+  }
+
+  code->_gc_epoch = 0;
+WB_END
+
+WB_ENTRY(void, WB_printMethodData(JNIEnv* env, jobject o, jobject method))
+  jmethodID jmid = reflected_method_to_jmid(thread, env, method);
+  MutexLocker mu(Compile_lock);
+  methodHandle mh(THREAD, Method::checked_resolve_jmethod_id(jmid));
+  nmethod* code = mh->code();
+  MethodData* mdo = mh->method_data();
+
+  tty->print_cr("compiled? %c, inv_count: %d, be_count: %d, inv_detal: %d, be_delta: %d",
+    code != nullptr ? 'Y' : 'N',
+    mdo == nullptr ? -1 : mdo->invocation_count(),
+    mdo == nullptr ? -1 : mdo->backedge_count(),
+    mdo == nullptr ? -1 : mdo->invocation_count_delta(),
+    mdo == nullptr ? -1 : mdo->backedge_count_delta());
+
+WB_END
+
 WB_ENTRY(jboolean, WB_IsMethodCompiled(JNIEnv* env, jobject o, jobject method, jboolean is_osr))
   jmethodID jmid = reflected_method_to_jmid(thread, env, method);
   CHECK_JNI_EXCEPTION_(env, JNI_FALSE);
@@ -2792,6 +2820,8 @@ static JNINativeMethod methods[] = {
                                                       (void*)&WB_DeoptimizeMethod  },
   {CC"isMethodCompiled0",   CC"(Ljava/lang/reflect/Executable;Z)Z",
                                                       (void*)&WB_IsMethodCompiled  },
+  {CC"evictNmethod0",   CC"(Ljava/lang/reflect/Executable;)V", (void*)&WB_evictNmethod  },
+  {CC"printMethodData0",   CC"(Ljava/lang/reflect/Executable;)V", (void*)&WB_printMethodData  },
   {CC"isMethodCompilable0", CC"(Ljava/lang/reflect/Executable;IZ)Z",
                                                       (void*)&WB_IsMethodCompilable},
   {CC"isMethodQueuedForCompilation0",

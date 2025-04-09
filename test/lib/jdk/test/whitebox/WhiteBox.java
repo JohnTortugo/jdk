@@ -336,6 +336,17 @@ public class WhiteBox {
   public native boolean isFrameDeoptimized(int depth);
   public native void    deoptimizeAll();
 
+  private native void evictNmethod0(Executable method);
+  public        void evictNmethod(Executable method) {
+    evictNmethod0(method);
+    fullGC();
+  }
+
+  private native void printMethodData0(Executable method);
+  public        void printMethodData(Executable method) {
+    printMethodData0(method);
+  }
+
   public        boolean isMethodCompiled(Executable method) {
     return isMethodCompiled(method, false /*not osr*/);
   }
