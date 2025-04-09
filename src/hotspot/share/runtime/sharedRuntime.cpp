@@ -3168,7 +3168,7 @@ void SharedRuntime::on_slowpath_allocation_exit(JavaThread* current) {
   // this object in the future without emitting card-marks, so
   // GC may take any compensating steps.
 
-  oop new_obj = current->vm_result();
+  oop new_obj = current->vm_result_oop();
   if (new_obj == nullptr) return;
 
   BarrierSet *bs = BarrierSet::barrier_set();
