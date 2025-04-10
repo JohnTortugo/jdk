@@ -26,11 +26,16 @@
 name: 'JDK Functional Tests'
 
 on:
+  push:
+    branches:
+      - '**'
+
   workflow_dispatch:
     inputs:
       branch:
         description: 'Which branch has the sources to build'
         required: true
+        default: ${{ github.head_ref || github.ref_name }}
       platforms:
         description: 'Platform(s) to execute on (comma separated, e.g. "linux-x64, macos, aarch64")'
         required: true
