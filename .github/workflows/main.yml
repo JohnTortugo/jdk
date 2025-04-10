@@ -48,7 +48,7 @@ on:
         required: false
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: Running-Tests-For-${{ github.event.inputs.branch }}
   cancel-in-progress: true
 
 jobs:
