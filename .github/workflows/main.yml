@@ -23,7 +23,7 @@
 # questions.
 #
 
-name: 'JDK Functional Tests'
+name: 'JDK-Functional-Tests'
 
 
 on:
