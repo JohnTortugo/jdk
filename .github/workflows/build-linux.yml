@@ -28,6 +28,9 @@ name: 'Build (linux)'
 on:
   workflow_call:
     inputs:
+      branch:
+        required: true
+        type: string
       platform:
         required: true
         type: string
@@ -78,7 +81,9 @@ jobs:
     steps:
       - name: 'Checkout the JDK source'
         uses: actions/checkout@v4
-
+        with:
+          ref: ${{ inputs.branch }}
+          
       - name: 'Get the BootJDK'
         id: bootjdk
         uses: ./.github/actions/get-bootjdk
