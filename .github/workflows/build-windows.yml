@@ -28,6 +28,9 @@ name: 'Build (windows)'
 on:
   workflow_call:
     inputs:
+      branch:
+        required: true
+        type: string
       platform:
         required: true
         type: string
@@ -80,6 +83,8 @@ jobs:
     steps:
       - name: 'Checkout the JDK source'
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: 'Get MSYS2'
         uses: ./.github/actions/get-msys2
