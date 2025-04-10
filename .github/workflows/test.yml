@@ -74,6 +74,11 @@ jobs:
           - test-name: 'jdk/tier1'
             test-suite: 'test/jdk/:tier1'
 
+          - test-name: 'jdk/tier1'
+            test-suite: 'test/jdk/:tier1'
+            debug-suffix: -debug
+            java-options: '-XX:-TieredCompilation -XX:Xcomp'
+
           - test-name: 'jdk/tier2'
             test-suite: 'test/jdk/:tier2'
 
@@ -86,6 +91,11 @@ jobs:
           - test-name: 'hs/tier1'
             test-suite: 'test/hotspot/jtreg/:tier1'
             debug-suffix: -debug
+
+          - test-name: 'hs/tier1'
+            test-suite: 'test/hotspot/jtreg/:tier1'
+            debug-suffix: -debug
+            java-options: '-XX:-TieredCompilation -XX:Xcomp'
 
           - test-name: 'hs/tier2'
             test-suite: 'test/hotspot/jtreg/:tier2'
