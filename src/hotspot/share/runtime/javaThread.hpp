@@ -782,7 +782,7 @@ private:
   oop  vm_result_oop() const                     { return _vm_result_oop; }
   void set_vm_result_oop(oop x)                  { _vm_result_oop   = x; }
 
-  void set_vm_result_2(Metadata* x)              { _vm_result_metadata   = x; }
+  void set_vm_result_metadata(Metadata* x)       { _vm_result_metadata   = x; }
 
   MemRegion deferred_card_mark() const           { return _deferred_card_mark; }
   void set_deferred_card_mark(MemRegion mr)      { _deferred_card_mark = mr;   }
@@ -849,7 +849,7 @@ private:
   }
   static ByteSize callee_target_offset()         { return byte_offset_of(JavaThread, _callee_target); }
   static ByteSize vm_result_oop_offset()         { return byte_offset_of(JavaThread, _vm_result_oop); }
-  static ByteSize vm_result_metadata_offset()           { return byte_offset_of(JavaThread, _vm_result_metadata); }
+  static ByteSize vm_result_metadata_offset()    { return byte_offset_of(JavaThread, _vm_result_metadata); }
   static ByteSize thread_state_offset()          { return byte_offset_of(JavaThread, _thread_state); }
   static ByteSize saved_exception_pc_offset()    { return byte_offset_of(JavaThread, _saved_exception_pc); }
   static ByteSize osthread_offset()              { return byte_offset_of(JavaThread, _osthread); }

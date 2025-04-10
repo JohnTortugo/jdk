@@ -200,7 +200,7 @@ JRT_ENTRY(void, InterpreterRuntime::resolve_ldc(JavaThread* current, Bytecodes::
     int offset = java_lang_boxing_object::value_offset(type);
     intptr_t flags = ((as_TosState(type) << ConstantPoolCache::tos_state_shift)
                       | (offset & ConstantPoolCache::field_index_mask));
-    current->set_vm_result_2((Metadata*)flags);
+    current->set_vm_result_metadata((Metadata*)flags);
   }
 }
 JRT_END
@@ -283,7 +283,7 @@ JRT_ENTRY(void, InterpreterRuntime::quicken_io_cc(JavaThread* current))
   // thread quicken the bytecode before we get here.
   // assert( cpool->tag_at(which).is_unresolved_klass(), "should only come here to quicken bytecodes" );
   Klass* klass = cpool->klass_at(which, CHECK);
-  current->set_vm_result_2(klass);
+  current->set_vm_result_metadata(klass);
 JRT_END
 
 
