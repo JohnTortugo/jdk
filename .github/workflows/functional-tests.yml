@@ -23,7 +23,7 @@
 # questions.
 #
 
-name: 'JDK-Functional-Tests'
+name: 'JDK-Functional-Tests-For-${{ github.event.inputs.branch }}'
 
 
 on:
