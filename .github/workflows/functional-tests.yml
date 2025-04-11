@@ -365,6 +365,15 @@ jobs:
   ###
   ### Test jobs
   ###
+  stress-test-linux-x64:
+    name: linux-x64
+    needs:
+      - build-linux-x64
+    uses: ./.github/workflows/stress-test.yml
+    with:
+      platform: linux-x64
+      bootjdk-platform: linux-x64
+      runs-on: ubuntu-22.04
 
   test-linux-x64:
     name: linux-x64
