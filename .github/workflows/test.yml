@@ -73,6 +73,7 @@ jobs:
         include:
           - test-name: 'jdk/tier1'
             test-suite: 'test/jdk/:tier1'
+            debug-suffix: -debug
 
           - test-name: 'jdk/tier1'
             test-suite: 'test/jdk/:tier1'
@@ -81,12 +82,11 @@ jobs:
 
           - test-name: 'jdk/tier2'
             test-suite: 'test/jdk/:tier2'
+            debug-suffix: -debug
 
           - test-name: 'jdk/tier3'
             test-suite: 'test/jdk/:tier3'
-
-          - test-name: 'jdk/tier4'
-            test-suite: 'test/jdk/:tier4'
+            debug-suffix: -debug
 
           - test-name: 'hs/tier1'
             test-suite: 'test/hotspot/jtreg/:tier1'
