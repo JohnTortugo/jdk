@@ -2119,6 +2119,7 @@ void nmethod::unlink() {
 
 void nmethod::purge(bool unregister_nmethod) {
   MutexLocker ml(CodeCache_lock, Mutex::_no_safepoint_check_flag);
+  ResourceMark rm;
 
   const char* name = method()->name()->as_C_string();
   const char* is_jvmci = "";
