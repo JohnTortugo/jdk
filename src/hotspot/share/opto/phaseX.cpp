@@ -675,12 +675,6 @@ ConNode* PhaseValues::zerocon(BasicType bt) {
 }
 
 
-
-//=============================================================================
-Node* PhaseGVN::apply_ideal(Node* k, bool can_reshape) {
-  return k->Ideal(this, can_reshape);
-}
-
 //------------------------------transform--------------------------------------
 // Return a node which computes the same function as this node, but
 // in a faster or cheaper fashion.
@@ -689,7 +683,7 @@ Node* PhaseGVN::transform(Node* n) {
 
   // Apply the Ideal call in a loop until it no longer applies
   Node* k = n;
-  Node* i = apply_ideal(k, /*can_reshape=*/false);
+  Node* i = k->Ideal(this, /*can_reshape=*/false);
   NOT_PRODUCT(uint loop_count = 1;)
   while (i != nullptr) {
     assert(i->_idx >= k->_idx, "Idealize should return new nodes, use Identity to return old nodes" );
@@ -699,7 +693,7 @@ Node* PhaseGVN::transform(Node* n) {
       dump_infinite_loop_info(i, "PhaseGVN::transform");
     }
 #endif
-    i = apply_ideal(k, /*can_reshape=*/false);
+    i = k->Ideal(this, /*can_reshape=*/false);
     NOT_PRODUCT(loop_count++;)
   }
   NOT_PRODUCT(if (loop_count != 0) { set_progress(); })
@@ -2216,7 +2210,7 @@ Node *PhaseIterGVN::transform_old(Node* n) {
 #ifndef PRODUCT
   uint hash_before = is_verify_Ideal_return() ? k->hash() : 0;
 #endif
-  Node* i = apply_ideal(k, /*can_reshape=*/true);
+  Node* i = k->Ideal(this, /*can_reshape=*/true);
   assert(i != k || is_new || i->outcnt() > 0, "don't return dead nodes");
 #ifndef PRODUCT
   if (is_verify_Ideal_return()) {
@@ -2251,7 +2245,7 @@ Node *PhaseIterGVN::transform_old(Node* n) {
 #ifndef PRODUCT
     uint hash_before = is_verify_Ideal_return() ? k->hash() : 0;
 #endif
-    i = apply_ideal(k, /*can_reshape=*/true);
+    i = k->Ideal(this, /*can_reshape=*/true);
     assert(i != k || is_new || (i->outcnt() > 0), "don't return dead nodes");
 #ifndef PRODUCT
     if (is_verify_Ideal_return()) {

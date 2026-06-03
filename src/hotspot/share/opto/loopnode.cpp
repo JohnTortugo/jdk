@@ -5267,7 +5267,6 @@ void PhaseIdealLoop::build_and_optimize() {
     return;
   }
 
-  BarrierSetC2* bs = BarrierSet::barrier_set()->barrier_set_c2();
   // Nothing to do, so get out
   bool stop_early = !C->has_loops() && !skip_loop_opts && !do_split_ifs && !do_max_unroll &&
                     !do_expand_reachability_fences && !_verify_me && !_verify_only;

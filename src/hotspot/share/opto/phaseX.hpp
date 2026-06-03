@@ -448,9 +448,6 @@ public:
 
   bool is_dominator(Node *d, Node *n) { return is_dominator_helper(d, n, true); }
 
-  // Helper to call Node::Ideal() and BarrierSetC2::ideal_node().
-  Node* apply_ideal(Node* i, bool can_reshape);
-
 #ifdef ASSERT
   void dump_infinite_loop_info(Node* n, const char* where);
   // Check for a simple dead loop when a data node references itself.
